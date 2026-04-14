@@ -5,8 +5,8 @@
 ![banner](banner.png)
 
 > **PREpiBind Webserver**
-> Jang DH, Kim D, Park B, Hwang U, Choi Y, Lee J.
-> *TBD* (2025)
+> Jang DH, Kim D, Choi Y, Lee J.
+> *TBD* (2026)
 
 A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESMC 300M protein language model embeddings. The server implements four task-specific models trained on qualitative, IC50, and mass spectrometry ligandomics data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
 
@@ -100,10 +100,10 @@ Download from HuggingFace and place in `models/`:
 
 ```bash
 # PREpiBind task-specific checkpoints
-huggingface-cli download daylight00/prepibind-esmc-300m --local-dir models/
+huggingface-cli download daylight-00/prepibind-esmc-300m --local-dir models/
 
 # ESMC 300M base model (FP16)
-huggingface-cli download daylight00/esmc-300m-2024-12 --local-dir models/
+huggingface-cli download daylight-00/esmc-300m-2024-12 --local-dir models/
 ```
 
 Expected files after download:
@@ -122,7 +122,7 @@ models/
 Pre-computed ESMC 300M embeddings for all 7,282 IPD-IMGT/HLA alleles are required for Standard Mode:
 
 ```bash
-huggingface-cli download daylight00/emb_hla_esmc_small_0601_fp16 \
+huggingface-cli download daylight-00/emb_hla_esmc_small_0601_fp16 \
     --repo-type dataset \
     --local-dir data/emb_hla_esmc_small_0601_fp16
 ```
@@ -199,13 +199,13 @@ Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated
 If you use PREpiBind or this web server, please cite:
 
 ```bibtex
-@article{Jang2025PREpiBind,
+@article{Jang2026PREpiBind,
   author  = {Jang, David Hyunyoo and Kim, Dongwoo and Park, Byungho
              and Hwang, Untaek and Choi, Yoonjoo and Lee, Juyong},
   title   = {{PREpiBind}: Protein Representation-integrated
              Epitope--{MHC} Class {II} Binding Prediction},
   journal = {TBD},
-  year    = {2025},
+  year    = {2026},
 }
 ```
 
