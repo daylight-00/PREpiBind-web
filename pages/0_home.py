@@ -8,7 +8,7 @@ st.markdown("**P**rotein **R**epresentation-integrated **Epi**tope-MHC Class II 
 st.markdown("""
 ### Overview
 **PREpiBind** is a web server for predicting peptide binding to human and mouse MHC class II molecules.
-It implements a transformer-based model using ESMC 300M protein language model embeddings, trained on
+It implements a transformer-based model using ESM C 300M protein language model embeddings, trained on
 qualitative, IC50, and mass spectrometry ligandomics data from IEDB (15-mer peptides; 151 unique HLA dimers).
 Pre-computed embeddings covering 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA enable
 prediction across alleles beyond those represented in the training data via PLM-based zero-shot generalization.

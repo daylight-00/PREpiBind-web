@@ -55,8 +55,8 @@ with col1:
 - PREpiBind web server code: ~[GitHub](https://github.com/daylight-00/PREpiBind-web)~
 - MHC-II allele datasets: ~[Zenodo](https://zenodo.org/communities/prepibind-mhc-alleles)~
 - PREpiBind checkpoints: [HuggingFace](https://huggingface.co/daylight00/prepibind-esmc-300m)
-- ESMC 300M checkpoints (float16): [HuggingFace](https://huggingface.co/daylight00/esmc-300m-2024-12)
-- Cached embeddings (ESMC 300M): [HuggingFace](https://huggingface.co/daylight00/esmc-300m-2024-12)
+- ESM C 300M checkpoints (float16): [HuggingFace](https://huggingface.co/daylight00/esmc-300m-2024-12)
+- Cached embeddings (ESM C 300M): [HuggingFace](https://huggingface.co/daylight00/esmc-300m-2024-12)
     """)
 
 
@@ -65,7 +65,7 @@ with col2:
     st.markdown("""
 - PREpiBind source code, web server, and datasets: **MIT License**
 - PREpiBind checkpoints: **MIT License**
-- ESMC 300M checkpoints & generated embeddings: 
+- ESM C 300M checkpoints & generated embeddings: 
   **[Cambrian Open License](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement)** (EvolutionaryScale)
     """)
 
@@ -94,7 +94,7 @@ If you use PREpiBind, please cite:
 """)
 with st.expander("Show full abstract"):
     st.markdown("""
-Accurate prediction of peptide-major histocompatibility complex class II (pMHC-II) binding remains challenging due to polymorphism, variable peptide length, and complex structural interactions. Here, we present PREpiBind, a modular framework evaluating diverse protein representations, including classical alignment-based (BLOSUM62), structure-informed (AlphaFold 3, Chai-1, Boltz-1), and transformer-based protein language models (PLMs; ESMC, ESM3).
+Accurate prediction of peptide-major histocompatibility complex class II (pMHC-II) binding remains challenging due to polymorphism, variable peptide length, and complex structural interactions. Here, we present PREpiBind, a modular framework evaluating diverse protein representations, including classical alignment-based (BLOSUM62), structure-informed (AlphaFold 3, Chai-1, Boltz-1), and transformer-based protein language models (PLMs; ESM C, ESM3).
 
 We systematically benchmarked PREpiBind against established methods (NetMHCIIpan, MixMHC2pred, DeepNeo) using comprehensive qualitative, quantitative (IC50), and mass spectrometry-derived ligandomics datasets. Transformer-based PLMs significantly outperformed classical and structure-informed embeddings across metrics (ROC AUC, PR AUC, F1, MCC). 
 

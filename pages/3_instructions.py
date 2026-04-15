@@ -26,7 +26,7 @@ st.markdown("""
 - **Beta chains**: 6,444 alleles — HLA-DPB1, HLA-DQB1, HLA-DQB2, HLA-DRB1, HLA-DRB3/4/5/6/9, and murine H2-IA/IE variants
     - Default: HLA-DRB1*15:01
 - **Nomenclature**: WHO HLA nomenclature (e.g., HLA-DRB1*01:01)
-- **Coverage note**: Pre-computed ESMC embeddings are available for all 7,282 alleles listed above. The underlying models were trained on 151 unique HLA dimers (27 alpha × 89 beta allele combinations) from IEDB; predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
+- **Coverage note**: Pre-computed ESM C embeddings are available for all 7,282 alleles listed above. The underlying models were trained on 151 unique HLA dimers (27 alpha × 89 beta allele combinations) from IEDB; predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
 
 #### CSV Upload
 
@@ -48,7 +48,7 @@ HLA-DRA*01:01,HLA-DRB1*15:01,GELIGILNAAKVPAD
 
 ### Prediction Models
 
-PREpiBind provides four models trained on distinct dataset types derived from the Immune Epitope Database (IEDB; April 2025). All models were trained on 15-mer peptides spanning 151 unique HLA class II dimers (27 alpha chains, 89 beta chains; human HLA-DP/DQ/DR and murine H2). All models share the same architecture: ESMC 300M embeddings processed by a two-block transformer encoder, with separate encoders for MHC and peptide inputs, followed by a joint interaction layer and mean pooling.
+PREpiBind provides four models trained on distinct dataset types derived from the Immune Epitope Database (IEDB; April 2025). All models were trained on 15-mer peptides spanning 151 unique HLA class II dimers (27 alpha chains, 89 beta chains; human HLA-DP/DQ/DR and murine H2). All models share the same architecture: ESM C 300M embeddings processed by a two-block transformer encoder, with separate encoders for MHC and peptide inputs, followed by a joint interaction layer and mean pooling.
 
 #### Available Models
 
@@ -69,14 +69,14 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 - **Output**: Probability of natural MHC-II presentation
 
 #### Technical Details
-- **Architecture**: ESMC 300M protein language model with task-specific transformer layers
+- **Architecture**: ESM C 300M protein language model with task-specific transformer layers
 - **MHC representation**: Pre-computed embeddings of domain-trimmed alpha and beta chain sequences (Standard Mode), or on-the-fly embedding computation (Custom Mode)
 - **Inference**: GPU-accelerated (CUDA); mixed-precision (FP16)
 
 #### Prediction Modes
 
 **Standard Mode:**
-- Uses pre-computed ESMC 300M embeddings for all 7,282 IPD-IMGT/HLA-catalogued alleles (human HLA-DP/DQ/DR and murine H2)
+- Uses pre-computed ESM C 300M embeddings for all 7,282 IPD-IMGT/HLA-catalogued alleles (human HLA-DP/DQ/DR and murine H2)
 - Training covered 151 unique HLA dimers; predictions for the remaining alleles rely on PLM-based zero-shot generalization
 - Recommended for routine screening with human or murine alleles
 
