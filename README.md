@@ -8,7 +8,7 @@
 > Jang DH, Kim D, Choi Y, Lee J.
 > *TBD* (2026)
 
-A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESMC 300M protein language model embeddings. The server implements four task-specific models trained on qualitative, IC50, and mass spectrometry ligandomics data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
+A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESM C 300M protein language model embeddings. The server implements four task-specific models trained on qualitative, IC50, and mass spectrometry ligandomics data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
 
 **Live server:** [https://lcdd.snu.ac.kr/prepibind](https://lcdd.snu.kr/prepibind)
 
@@ -102,7 +102,7 @@ Download from HuggingFace and place in `models/`:
 # PREpiBind task-specific checkpoints
 huggingface-cli download daylight-00/prepibind-esmc-300m --local-dir models/
 
-# ESMC 300M base model (FP16)
+# ESM C 300M base model (FP16)
 huggingface-cli download daylight-00/esmc-300m-2024-12 --local-dir models/
 ```
 
@@ -119,7 +119,7 @@ models/
 
 ### 3. Download pre-computed HLA embeddings
 
-Pre-computed ESMC 300M embeddings for all 7,282 IPD-IMGT/HLA alleles are required for Standard Mode:
+Pre-computed ESM C 300M embeddings for all 7,282 IPD-IMGT/HLA alleles are required for Standard Mode:
 
 ```bash
 huggingface-cli download daylight-00/emb_hla_esmc_small_0601_fp16 \
@@ -151,7 +151,7 @@ For production deployment behind a reverse proxy, set `--server.baseUrlPath` to 
 
 ## Model Architecture
 
-The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA embedding (concatenated alpha + beta chain from ESMC 300M) and a tokenized peptide sequence — and processes them through:
+The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA embedding (concatenated alpha + beta chain from ESM C 300M) and a tokenized peptide sequence — and processes them through:
 
 1. Separate two-block self-attention encoders for HLA and epitope representations
 2. A single joint interaction block (concatenation + self-attention)
@@ -160,7 +160,7 @@ The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA e
 The output score is sigmoid-transformed; scores ≥ 0.5 indicate predicted binding.
 
 **Standard Mode** uses pre-computed embeddings stored in `data/emb_hla_esmc_small_0601_fp16/`.
-**Custom HLA Mode** computes ESMC embeddings on-the-fly for arbitrary MHC sequences not in the database (including non-human alleles such as Mamu, SLA, and BoLA).
+**Custom HLA Mode** computes ESM C embeddings on-the-fly for arbitrary MHC sequences not in the database (including non-human alleles such as Mamu, SLA, and BoLA).
 
 ---
 
@@ -188,7 +188,7 @@ Column headers must match exactly. Allele names must follow WHO HLA nomenclature
 
 ## Notes on Allele Coverage
 
-The server provides pre-computed ESMC embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **151 unique HLA dimers** (27 alpha × 89 beta allele combinations) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
+The server provides pre-computed ESM C embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **151 unique HLA dimers** (27 alpha × 89 beta allele combinations) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
 
 Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for these species.
 
@@ -209,11 +209,11 @@ If you use PREpiBind or this web server, please cite:
 }
 ```
 
-The ESMC 300M model is developed by EvolutionaryScale and is subject to the [Cambrian Open License Agreement](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement).
+The ESM C 300M model is developed by EvolutionaryScale and is subject to the [Cambrian Open License Agreement](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement).
 
 ---
 
 ## License
 
 The PREpiBind web server source code is released under the [MIT License](LICENSE).
-ESMC 300M model weights are subject to the Cambrian Open License (EvolutionaryScale).
+ESM C 300M model weights are subject to the Cambrian Open License (EvolutionaryScale).
