@@ -17,6 +17,7 @@ import artifacts
 import scan
 
 _grids = {}
+_built = {}
 
 
 def load(head):
@@ -36,17 +37,46 @@ def molecules(head):
 
 
 def on_panel(head, molecule):
+    """In the precomputed 306-molecule panel. Distinct from `has_background`."""
     return any(k.startswith(molecule + "|") for k in load(head)._g)
+
+
+def has_background(head, molecule):
+    """Rankable at all — on the panel, or with a grid already built on demand."""
+    return on_panel(head, molecule) or _cached(head, molecule) is not None
+
+
+def _cached(head, molecule):
+    """A grid built on demand for an off-panel molecule, if one exists. See `grids.py`."""
+    import grids
+
+    key = (head, molecule)
+    if key not in _built:
+        if not grids.cached(molecule, head):
+            _built[key] = None
+        else:
+            with np.load(grids.path(molecule, head), allow_pickle=True) as z:
+                _built[key] = scan.PercentileGrid(path=None, _g={k: z[k] for k in z.files})
+    return _built[key]
+
+
+def invalidate(head, molecule):
+    """Forget a cached grid — call after building one so the next query sees it."""
+    _built.pop((head, molecule), None)
 
 
 def rank(head, molecule, length, logits):
     """Percent of the background scoring at least as high. Lower is a stronger binder.
 
-    None when the molecule is off-panel — it has no background, and under
-    `img2-server-output-contract.md` §3 one is built for it on first request rather than the score
-    being reported bare.
+    Falls back to a grid built on demand for this molecule. None when neither exists: the molecule
+    has no background, and under `img2-server-output-contract.md` §3 a bare logit is not offered in
+    its place, because it is not comparable across alleles, lengths or heads.
     """
-    return load(head).rank(molecule, int(length), logits)
+    out = load(head).rank(molecule, int(length), logits)
+    if out is not None:
+        return out
+    grid = _cached(head, molecule)
+    return grid.rank(molecule, int(length), logits) if grid is not None else None
 
 
 def resolution(head):

@@ -10,6 +10,8 @@ data/.cache/
 
 # ── img2 served artifacts (symlinks into run directories; see README) ────────
 data/grids/
+data/grids_cache/
+data/background_*.txt
 data/BANDS.json
 data/chain_table.csv
 models/*_manifest.json

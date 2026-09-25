@@ -19,6 +19,11 @@ MIN_LEN, MAX_LEN = 12, 25          # accepted
 VALIDATED_LEN = (12, 21)           # img2-validated-length-range.md
 MAX_MOLECULES = 10
 MAX_PEPTIDES = 2000
+# A background build is minutes of exclusive GPU on the serving card: 73 s for the shared
+# embedding pass over the 100,000-peptide background, then 77 s per head in fp32. The cap keeps
+# one user working through a chain list from pinning the card (output-contract §3).
+BUILD_MINUTES = 5
+BUILD_CAP_PER_SESSION = 3
 
 st.title("Prediction")
 
@@ -51,16 +56,40 @@ betas = col_b.multiselect(f"β chain (up to {MAX_MOLECULES})", beta_options,
 # two chain lists compose ~1.36 million molecules and the panel is 306 per head, so this is stated
 # before a run rather than discovered in the results.
 selected = [chains.molecule(alpha, b) for b in betas]
-off_panel = [m for m in selected if not rankmod.on_panel(artifacts.HEADLINE, m)]
-if off_panel:
+missing = [(b, m) for b, m in zip(betas, selected)
+           if not rankmod.has_background(artifacts.HEADLINE, m)]
+if missing:
     st.warning(
-        f"**{len(off_panel)} of {len(selected)} selected molecules have no %Rank background.** "
-        "They are scored, but only a raw logit is available for them, and a raw logit is not "
-        "comparable between alleles, lengths or heads. Building a background takes about 78 s per "
-        "molecule on this server and is not yet wired in.\n\n"
-        + ", ".join(f"`{m}`" for m in off_panel[:6])
-        + (" …" if len(off_panel) > 6 else "")
+        f"**{len(missing)} of {len(selected)} selected molecules have no %Rank background yet.** "
+        "They can be scored, but the percentile is what makes a score mean anything across "
+        "molecules, lengths and heads, so the server leaves it blank rather than showing a bare "
+        "logit in its place.\n\n"
+        + ", ".join(f"`{m}`" for _, m in missing[:6]) + (" …" if len(missing) > 6 else "")
     )
+    built_here = st.session_state.setdefault("built", 0)
+    # A per-session cap, because the build is minutes of exclusive GPU and one user working
+    # through a chain list would otherwise pin the card for everyone.
+    if built_here >= BUILD_CAP_PER_SESSION:
+        st.error(f"This session has already built {built_here} backgrounds, which is the cap.")
+    elif st.button(f"Build {len(missing)} background(s) — about "
+                   f"{len(missing) * BUILD_MINUTES:.0f} min of exclusive GPU", key="build_bg"):
+        import grids
+
+        bar = st.progress(0.0)
+        for i, (beta_i, mol) in enumerate(missing):
+            if st.session_state["built"] >= BUILD_CAP_PER_SESSION:
+                st.error("Per-session cap reached; the remaining molecules were not built.")
+                break
+            bar.progress(i / len(missing), text=f"{mol} — {i + 1} of {len(missing)}")
+            with grids.GPU:
+                grids.build(get_engine(), alpha, beta_i,
+                            progress=lambda d, t, i=i: bar.progress(
+                                (i + d / t) / len(missing), text=f"{mol} — {i + 1} of {len(missing)}"))
+            for head in artifacts.HEADS:
+                rankmod.invalidate(head, mol)
+            st.session_state["built"] += 1
+        bar.empty()
+        st.rerun()
 
 # ---------------------------------------------------------------- peptides
 st.subheader("Peptides")
