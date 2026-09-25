@@ -59,16 +59,25 @@ class Engine:
 
     def __init__(self, heads=None, device=None):
         import torch
-        from esm.models.esmc import ESMC
-        from esm.tokenization import get_esmc_model_tokenizers
 
+        from esmc import ESMC, EsmSequenceTokenizer
         from model import plm_cat_mean_inf
 
         self.torch = torch
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
+        # `code/esmc/` rather than `pip install esm`. The package is not a dependency this server can
+        # afford: importing `esm.models.esmc` drags biotite 0.41.2, which pins numpy<2 and holds the
+        # whole stack at an old Python. Dropping it is what lets this env track the serving stack the
+        # optimisation work is built on.
+        #
+        # The swap is free, not a trade. Verified on this host against the served checkpoint:
+        # `torch.equal` on the embeddings, 0.000e+00, on CPU fp32 and on the serving 4070 Ti in fp16,
+        # including a 1-residue peptide, a 25-mer and non-standard residues; and the tokenizer agrees
+        # with `esm`'s on all 21,797 unique peptides of the demo set. Upstream verified the same
+        # against an H100 with flash-attn on (IMG note 2026-09-10).
         self.client = ESMC(d_model=960, n_heads=15, n_layers=30,
-                           tokenizer=get_esmc_model_tokenizers(), use_flash_attn=True)
+                           tokenizer=EsmSequenceTokenizer(), use_flash_attn=True)
         self.client.load_state_dict(
             torch.load(artifacts.ESM_CHECKPOINT, map_location="cpu", weights_only=False))
         self.client.to(self.device, dtype=getattr(torch, ESM_DTYPE)).eval()

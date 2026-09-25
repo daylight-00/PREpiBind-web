@@ -1,0 +1,41 @@
+[project]
+# The serving stack for the img2 webserver, aligned with `260919/2_speed/envs/next` so that what the
+# optimisation work measures is what this server runs. Versions are free to move, per hwjang's
+# 2026-09-19 call: the checkpoint lineage and the served artifact are separate concerns, and a
+# numerics change costs one %Rank grid rebuild rather than a paper.
+#
+# **No `esm` package.** Importing `esm.models.esmc` drags biotite 0.41.2, which pins numpy<2 and
+# holds the whole stack at an old Python; dropping it is what lets this env be current. The encoder
+# is vendored at `code/esmc/`, from esm 3.4.0's legacy stack, which is MIT. Verified bit-identical
+# on this host against the served checkpoint -- torch.equal on the embeddings, 0.000e+00, CPU fp32
+# and 4070 Ti fp16, and 0 tokenizer mismatches over 21,797 peptides.
+name = "prepibind-web"
+version = "1.0.0"
+description = "PREpiBind img2 web server: MHC class II binding prediction reported as %Rank"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "torch>=2.14",
+    "numpy",
+    "pandas>=2.2",
+    "h5py>=3.13",
+    "streamlit>=1.55",
+    "plotly>=6.1",
+    "scikit-learn>=1.7",   # Evaluation page: ROC and PR only, no threshold metrics
+    "scipy>=1.15",
+    "biopython>=1.85",     # domain.py: locating the binding window in an uncatalogued chain
+]
+
+[tool.uv]
+# flash-attn has no wheel and victor has no nvcc, so it is not installed and not worked around.
+# Measured rather than assumed: with it off, an embedding moves by at most 1.03e-02, a %Rank by
+# 0.061 percentile points on average and 0.80 at most, and NO strong/weak call changed over 300
+# peptides -- the same order as the fp16, serving-host and submission-size terms already disclosed.
+no-build-package = ["flash-attn"]
+# Only ever resolved and run on victor. Without this uv also solves win32/s390x splits, which fail
+# for reasons that have nothing to do with this host.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# The download.pytorch.org `+cuXXX` wheels declare no nvidia-* deps and assume a CUDA toolkit on the
+# host. victor has none, so the backend selector is what makes this installable at all.
+torch-backend = "cu130"
