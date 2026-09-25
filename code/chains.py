@@ -124,12 +124,18 @@ def _natural_key(s):
 
 
 def chain_lists():
-    """{'alpha': [...], 'beta': [...]} over every offered chain, naturally sorted.
+    """{'alpha': [...], 'beta': [...]} over the chains the server offers, naturally sorted.
 
-    A class-II beta chain's name carries a capital B (`HLA-DRB1*…`, `H2-IAbB`); an alpha chain's
-    does not. Mouse names put the chain letter last, which the same rule covers.
+    The catalogue is `mhc_mapping.csv` — the 7,282 human HLA-DP/DQ/DR and mouse H2 chains. The chain
+    table is a *sequence source* for the 134 it defines, not a second catalogue: it also carries
+    BoLA, SLA and Mamu chains that this server does not offer and has no background for.
+
+    A class-II beta chain is named by the locus gene, `…DPB1`, `…DQB1`, `…DRB1/3/4/5`, or a mouse
+    `…B` suffix. Matching a bare capital `B` anywhere in the name would classify `BoLA-DRA` as a beta
+    chain, which is how this was first written and why it is now anchored to the gene.
     """
-    names = set(_load_mapping()) | set(_load_table())
-    beta = sorted((n for n in names if "B" in n), key=_natural_key)
-    alpha = sorted((n for n in names if "B" not in n), key=_natural_key)
+    names = set(_load_mapping())
+    is_beta = re.compile(r"(D[PQR]B\d|-I[AE]\w*B$|B\d\*)").search
+    beta = sorted((n for n in names if is_beta(n)), key=_natural_key)
+    alpha = sorted((n for n in names if not is_beta(n)), key=_natural_key)
     return {"alpha": alpha, "beta": beta}

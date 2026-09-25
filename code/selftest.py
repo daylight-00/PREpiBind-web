@@ -45,19 +45,36 @@ def main():
           f"A={len(chains.sequence('H2-IAdA'))} B={len(chains.sequence('H2-IAdB'))}")
 
     lists = chains.chain_lists()
-    check("all offered chains listed", len(lists["alpha"]) + len(lists["beta"]) >= 7282,
+    check("offered chains are the 7,282 catalogue",
+          (len(lists["alpha"]), len(lists["beta"])) == (838, 6444),
           f"{len(lists['alpha'])} alpha + {len(lists['beta'])} beta")
+    # Every panel molecule must be reachable from the two selectboxes, or part of the panel is
+    # precomputed and unusable.
+    alpha, beta = set(lists["alpha"]), set(lists["beta"])
+    panel = rank.molecules(artifacts.HEADLINE)
+    reachable = [m for m in panel
+                 if m.split("_")[0] in beta and m.split("_")[1] in alpha]
+    check("panel is composable from those lists", len(reachable) == len(panel),
+          f"{len(reachable)}/{len(panel)}")
 
     for head in artifacts.HEADS:
         mols = rank.molecules(head)
         check(f"panel {head}", len(mols) == 306, f"{len(mols)} molecules")
 
-    # A molecule on the panel ranks; one composed off-panel does not, and says so by returning None.
+    # A molecule on the panel ranks. One with no background at all returns None rather than a bare
+    # logit — picked here as a molecule that is neither on the panel nor in the on-demand cache,
+    # since a built grid legitimately makes an off-panel molecule rankable.
     mol = "HLA-DRB1*15:01_HLA-DRA*01:01"
     r = rank.rank("ms", mol, 15, [2.0])
     check("panel molecule ranks", r is not None and 0 <= r[0] <= 100, f"logit 2.0 -> {r[0]:.2f}%")
-    check("off-panel returns None",
-          rank.rank("ms", "HLA-DRB1*15:01_HLA-DQA1*05:05", 15, [2.0]) is None)
+
+    lists = chains.chain_lists()
+    ungrounded = next(
+        (m for a in lists["alpha"][:40] for b in lists["beta"][:40]
+         if not rank.has_background("ms", (m := chains.molecule(a, b)))), None)
+    check("no background returns None, not a bare logit",
+          ungrounded is not None and rank.rank("ms", ungrounded, 15, [2.0]) is None,
+          str(ungrounded))
 
     # The reason %Rank exists: the same logit is a different rarity on each head.
     per_head = {h: rank.rank(h, mol, 15, [2.0]) for h in artifacts.HEADS}
