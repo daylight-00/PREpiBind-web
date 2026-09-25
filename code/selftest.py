@@ -5,6 +5,7 @@ integrity of the served weights, the vendored compute path, the chain-table spli
 and that the bands come from the file rather than from prose.
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -80,6 +81,30 @@ def main():
     per_head = {h: rank.rank(h, mol, 15, [2.0]) for h in artifacts.HEADS}
     spread = {h: round(float(v[0]), 2) for h, v in per_head.items() if v is not None}
     check("heads are not on one scale", len(set(spread.values())) == len(spread), str(spread))
+
+    # Domain inference for a chain the catalogue does not have, against the chain table's own
+    # annotation. Getting this wrong is worth 20% of band calls, so it is checked, not assumed.
+    import csv as _csv
+
+    import domain
+
+    annotated = {}
+    for row in _csv.DictReader(open(os.path.join(artifacts.ROOT, "data", "chain_table.csv"))):
+        parts = row["HLA_Seq"].split("|")
+        if len(parts) == 3:
+            annotated[row["HLA_Name"]] = (parts[0], int(parts[1]), int(parts[2]))
+    catalogued = {n for n, *_ in domain._catalogue()}
+    novel = sorted(n for n in annotated if n not in catalogued)
+    off = []
+    for name in novel:
+        seq, lo, hi = annotated[name]
+        kind = "alpha" if re.search(r"D[PQR]A|-I[AE]\w*A$", name) else "beta"
+        got = domain.infer_window(seq, kind=kind)
+        off.append(None if got is None else max(abs(got[0] - lo), abs(got[1] - hi)))
+    exact = sum(1 for d in off if d == 0)
+    check("domain inference on non-catalogue chains",
+          all(d is not None and d <= 1 for d in off),
+          f"{exact}/{len(novel)} exact, all within {max(d for d in off if d is not None)} residue")
 
     check("band from the file", rank.band(0.5, b) == "Strong" and rank.band(3.0, b) == "Weak"
           and rank.band(9.0, b) is None)

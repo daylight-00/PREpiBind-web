@@ -71,7 +71,7 @@ def _quantile_breaks(values, n_breaks=N_BREAKS):
     return np.quantile(np.asarray(values, dtype=np.float64), q)[::-1].astype(np.float32)
 
 
-def build(engine, alpha, beta, heads=None, progress=None):
+def build(engine, alpha, beta, heads=None, progress=None, hla=None, molecule=None):
     """Score the whole background for one molecule and write a grid per head.
 
     Returns the metadata written beside the grids. Blocking and expensive by design: the serving GPU
@@ -86,11 +86,14 @@ def build(engine, alpha, beta, heads=None, progress=None):
     import torch
 
     heads = list(heads or artifacts.HEADS)
-    molecule = chains.molecule(alpha, beta)
+    # `hla` / `molecule` are the custom-HLA path: chains the catalogue does not have, embedded by
+    # the caller. Everything else about the build is identical, which is the point -- a custom
+    # molecule's background has to come off the same 100k peptides as the panel's.
+    molecule = molecule or chains.molecule(alpha, beta)
     peptides = [p.strip() for p in open(_background(molecule)) if p.strip()]
     lengths = np.array([len(p) for p in peptides])
 
-    hla = chains.molecule_embedding(alpha, beta)
+    hla = chains.molecule_embedding(alpha, beta) if hla is None else hla
     xh = torch.tensor(hla, dtype=torch.float32, device=engine.device).unsqueeze(0)
     mh = torch.zeros(1, xh.shape[1], dtype=torch.bool, device=engine.device)
 
@@ -125,7 +128,8 @@ def build(engine, alpha, beta, heads=None, progress=None):
         "background": os.path.basename(_background(molecule)), "n_background": len(peptides),
         "lengths": sorted(set(lengths.tolist())), "n_breaks": N_BREAKS,
         "heads": heads, "host": os.uname().nodename,
-        "chain_source": {c: chains.source(c) for c in (alpha, beta)},
+        "chain_source": ({c: chains.source(c) for c in (alpha, beta)}
+                         if alpha and beta else "custom sequences supplied by the user"),
         "seconds": round(time.time() - started, 1),
         "built_by": "PREpiBind-web/code/grids.py, the on-disk contract of 260905/5_rank/build_grid.py",
         "caveat": ("scores from one head on one host; a query ranked against this grid must be "

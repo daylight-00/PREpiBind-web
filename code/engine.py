@@ -118,17 +118,23 @@ class Engine:
                 torch.zeros(n, xe.shape[1], dtype=torch.bool, device=self.device))
         return out.float().cpu().numpy().ravel()
 
-    def score(self, df, head, epi_emb, progress=None, legacy=False):
+    def score(self, df, head, epi_emb, progress=None, legacy=False, hla_emb=None):
         """Logits for a frame of (molecule, Epitope) rows. Batched within one molecule and length.
 
         Never mixes lengths in a batch: `score_windows` does the same, and it is what keeps the
         epitope side unpadded.
+
+        `hla_emb` is `{molecule: (L, 960)}` and overrides the lookup by chain name — the custom-HLA
+        mode, where the chains are sequences the catalogue does not have, supplies it.
         """
         logits = np.full(len(df), np.nan, dtype=np.float32)
         done, total = 0, len(df)
         for molecule, per_mol in df.groupby("molecule", sort=False):
-            alpha, beta = per_mol.iloc[0].MHC_alpha, per_mol.iloc[0].MHC_beta
-            hla = chains.molecule_embedding(alpha, beta, legacy=legacy)
+            if hla_emb is not None and molecule in hla_emb:
+                hla = hla_emb[molecule]
+            else:
+                alpha, beta = per_mol.iloc[0].MHC_alpha, per_mol.iloc[0].MHC_beta
+                hla = chains.molecule_embedding(alpha, beta, legacy=legacy)
             for _, per_len in per_mol.groupby(per_mol.Epitope.str.len(), sort=True):
                 pos = df.index.get_indexer(per_len.index)
                 peps = per_len.Epitope.tolist()

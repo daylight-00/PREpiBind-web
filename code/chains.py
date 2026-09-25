@@ -145,3 +145,16 @@ def chain_lists():
     beta = sorted((n for n in names if is_beta(n)), key=_natural_key)
     alpha = sorted((n for n in names if not is_beta(n)), key=_natural_key)
     return {"alpha": alpha, "beta": beta}
+
+
+def custom_key(alpha_seq, beta_seq, aligned):
+    """A stable molecule key for two sequences the catalogue does not have.
+
+    Keyed by content, and by HOW the chains were cut: the same pair of sequences used whole and
+    sliced to their binding domains are different molecules to the head, so they must not share a
+    %Rank background.
+    """
+    import hashlib
+
+    h = hashlib.sha256(f"{beta_seq}|{alpha_seq}|{'aligned' if aligned else 'whole'}".encode())
+    return f"custom-{'a' if aligned else 'w'}-{h.hexdigest()[:12]}"
