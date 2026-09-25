@@ -72,7 +72,10 @@ st.markdown(
 
 pg = st.navigation(
     [
-        st.Page("pages/1_prediction.py", title="Prediction", default=True),
+        st.Page("pages/0_home.py", title="Home", default=True),
+        st.Page("pages/1_prediction.py", title="Prediction"),
+        st.Page("pages/3_instructions.py", title="Instructions"),
+        st.Page("pages/4_about.py", title="About"),
     ],
     position="top",
 )

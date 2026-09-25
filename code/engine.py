@@ -42,6 +42,10 @@ import scan
 EMBED_BATCH = 64
 SCORE_BATCH = 256
 
+# The validated / reportable range. Input is accepted to 25 and scored, but nothing above this is
+# pooled into a performance figure anywhere in the project.
+VALIDATED_MAX = 21
+
 # The ESMC weights shipped with the server are fp16 and there is no fp32 copy; the panel grids were
 # scored in fp32 (`grid_precision`). The resulting deviation is the smallest term the project has
 # measured on this path — fp16 embeddings differ by at most 8.79e-03 and move a %Rank by well under
@@ -135,6 +139,10 @@ class Engine:
         out = df.copy().reset_index(drop=True)
         out["molecule"] = [chains.molecule(a, b) for a, b in zip(out.MHC_alpha, out.MHC_beta)]
         out["length"] = out.Epitope.str.len()
+        # 12-21 is the only range a pooled figure on this server covers; 22-25 is scored and
+        # published per length but never pooled (`img2-ms-arm-and-length-range.md` §2). Carrying it
+        # as a column means the caveat survives into a downloaded CSV.
+        out["length_support"] = np.where(out.length <= VALIDATED_MAX, "validated", "limited")
 
         epi_emb = self.embed(out.Epitope.tolist(), progress=progress)
         bands = artifacts.bands()
