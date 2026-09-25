@@ -87,18 +87,24 @@ def known(name):
     return name in _load_table() or name in _load_mapping()
 
 
-def sequence(name):
-    """The binding-domain window the server scores, from whichever source owns this chain."""
-    if name in _load_table():
+def sequence(name, legacy=False):
+    """The binding-domain window the server scores, from whichever source owns this chain.
+
+    `legacy=True` forces `mhc_mapping.csv` even for the 134 the table defines. That is only correct
+    for the img1 checkpoints, which were fitted before the 2026-09-09 H2 chain fix: for *them* the
+    stale copy is the self-consistent one, and using the corrected table would neither reproduce the
+    img1-era server nor match what those weights were trained on.
+    """
+    if not legacy and name in _load_table():
         seq, a, b = _load_table()[name]
         return seq[a:b] if a is not None else seq
     seq, a, b = _load_mapping()[name]
     return seq[a:b]
 
 
-def embedding(name):
-    """(L, 960) float32 for one chain, sliced as in training."""
-    if name in _load_table():
+def embedding(name, legacy=False):
+    """(L, 960) float32 for one chain, sliced as in training. See `sequence` for `legacy`."""
+    if not legacy and name in _load_table():
         _, a, b = _load_table()[name]
         emb = np.squeeze(_store()[name][()])
         return (emb[a:b] if a is not None else emb).astype(np.float32)
@@ -115,8 +121,8 @@ def molecule(alpha, beta):
     return f"{beta}_{alpha}"
 
 
-def molecule_embedding(alpha, beta):
-    return np.concatenate([embedding(beta), embedding(alpha)], axis=0)
+def molecule_embedding(alpha, beta, legacy=False):
+    return np.concatenate([embedding(beta, legacy), embedding(alpha, legacy)], axis=0)
 
 
 def _natural_key(s):

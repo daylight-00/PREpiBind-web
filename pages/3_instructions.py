@@ -334,8 +334,12 @@ Constraints on what the output means, not boilerplate.
 6. **A %Rank grid belongs to one head and one batch size.** Batch size alone moves a %Rank by 0.32
    percentile points; the serving host contributes 0.05 pp on average and 0.20 pp at most. Near a
    band boundary a call can flip for reasons that are numerical, not biological.
-7. **Training embeddings were computed one peptide at a time; served embeddings are batched.** The
-   logit spread shifts by 1.9 %, harmless for ranking (Spearman 0.9996), stated rather than hidden.
+7. **A peptide's score depends slightly on what you submitted it with.** ESM C embeds in batches, so
+   the same peptide in a submission of 4 and a submission of 400 gets marginally different
+   embeddings. Measured here: the logit moves by 0.004 on average (0.038 at most, against a spread
+   of 2.2), the %Rank by **0.053 percentile points on average and 0.5 at most**, and over 300
+   peptides **no band call changed**. That is the same order as the fp16 and serving-host terms.
+   Re-submitting the identical set is bit-identical.
 8. **One seed.** Every served head is a single fit at seed 42. There is no seed-level variance
    component, and SD columns anywhere in this documentation are across held-out units, not seeds.
 9. **Neither the training arm nor the validated range was prespecified.** Both were fixed after

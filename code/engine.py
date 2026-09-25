@@ -81,6 +81,24 @@ class Engine:
             m.load_state_dict({k: v.float() for k, v in state.items()})
             self.heads[head] = m.to(self.device, dtype=getattr(torch, HEAD_DTYPE)).eval()
 
+    def add_head(self, name, checkpoint):
+        """Load one more head over the shared ESMC — used for the img1 legacy checkpoints.
+
+        The language model is the expensive resident; a head is 55.8 M parameters, so the legacy
+        page costs a tail rather than a second model.
+        """
+        import torch
+
+        from model import plm_cat_mean_inf
+
+        if name not in self.heads:
+            m = plm_cat_mean_inf(hla_dim=960, epi_dim=960, head_div=64)
+            state = torch.load(checkpoint, map_location="cpu",
+                               weights_only=False)["model_state_dict"]
+            m.load_state_dict({k: v.float() for k, v in state.items()})
+            self.heads[name] = m.to(self.device, dtype=getattr(torch, HEAD_DTYPE)).eval()
+        return self.heads[name]
+
     # ------------------------------------------------------------------ embedding
     def embed(self, peptides, progress=None):
         """{peptide: (L, 960)} through the same function the %Rank background was built with."""
@@ -100,7 +118,7 @@ class Engine:
                 torch.zeros(n, xe.shape[1], dtype=torch.bool, device=self.device))
         return out.float().cpu().numpy().ravel()
 
-    def score(self, df, head, epi_emb, progress=None):
+    def score(self, df, head, epi_emb, progress=None, legacy=False):
         """Logits for a frame of (molecule, Epitope) rows. Batched within one molecule and length.
 
         Never mixes lengths in a batch: `score_windows` does the same, and it is what keeps the
@@ -110,7 +128,7 @@ class Engine:
         done, total = 0, len(df)
         for molecule, per_mol in df.groupby("molecule", sort=False):
             alpha, beta = per_mol.iloc[0].MHC_alpha, per_mol.iloc[0].MHC_beta
-            hla = chains.molecule_embedding(alpha, beta)
+            hla = chains.molecule_embedding(alpha, beta, legacy=legacy)
             for _, per_len in per_mol.groupby(per_mol.Epitope.str.len(), sort=True):
                 pos = df.index.get_indexer(per_len.index)
                 peps = per_len.Epitope.tolist()
