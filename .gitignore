@@ -8,6 +8,12 @@ data/emb_hla_esmc_small_light_0601_fp16/
 data/*.h5
 data/.cache/
 
+# ── img2 served artifacts (symlinks into run directories; see README) ────────
+data/grids/
+data/BANDS.json
+data/chain_table.csv
+models/*_manifest.json
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/
 streamlit.log

@@ -1,0 +1,80 @@
+"""Startup checks for the served artifacts. `python code/selftest.py` from the repository root.
+
+Each check is one thing that has silently broken before, or that a decision says must hold:
+integrity of the served weights, the vendored compute path, the chain-table split, the panel size,
+and that the bands come from the file rather than from prose.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import artifacts
+import chains
+import rank
+
+FAIL = []
+
+
+def check(name, ok, detail=""):
+    print(f"{'ok  ' if ok else 'FAIL'}  {name}{'  ' + detail if detail else ''}")
+    if not ok:
+        FAIL.append(name)
+
+
+def main():
+    for head, (ok, got) in artifacts.verify().items():
+        check(f"served checkpoint {head}", ok, got[:12])
+
+    for path, (ok, got) in artifacts.check_vendored().items():
+        check(f"vendored {path}", ok, got[:12])
+
+    b = artifacts.bands()
+    check("bands from BANDS.json",
+          b["bands"]["strong_rank_pct_max"] == 1.0 and b["bands"]["weak_rank_pct_max"] == 5.0,
+          f"strong<={b['bands']['strong_rank_pct_max']} weak<={b['bands']['weak_rank_pct_max']}")
+    check("bands carry their limits", "negatives_are" in b["evidence"])
+
+    # The six chains where the two sources disagree must all resolve to the table.
+    disputed = ["H2-IAdA", "H2-IAdB", "H2-IAg7A",
+                "HLA-DQB1*03:01", "HLA-DQB1*05:03", "HLA-DQB1*06:01"]
+    check("disputed chains resolve to the table",
+          all(chains.source(c) == "table" for c in disputed))
+    check("H2-IAd is no longer swapped",
+          len(chains.sequence("H2-IAdA")) == 81 and len(chains.sequence("H2-IAdB")) == 75,
+          f"A={len(chains.sequence('H2-IAdA'))} B={len(chains.sequence('H2-IAdB'))}")
+
+    lists = chains.chain_lists()
+    check("all offered chains listed", len(lists["alpha"]) + len(lists["beta"]) >= 7282,
+          f"{len(lists['alpha'])} alpha + {len(lists['beta'])} beta")
+
+    for head in artifacts.HEADS:
+        mols = rank.molecules(head)
+        check(f"panel {head}", len(mols) == 306, f"{len(mols)} molecules")
+
+    # A molecule on the panel ranks; one composed off-panel does not, and says so by returning None.
+    mol = "HLA-DRB1*15:01_HLA-DRA*01:01"
+    r = rank.rank("ms", mol, 15, [2.0])
+    check("panel molecule ranks", r is not None and 0 <= r[0] <= 100, f"logit 2.0 -> {r[0]:.2f}%")
+    check("off-panel returns None",
+          rank.rank("ms", "HLA-DRB1*15:01_HLA-DQA1*05:05", 15, [2.0]) is None)
+
+    # The reason %Rank exists: the same logit is a different rarity on each head.
+    per_head = {h: rank.rank(h, mol, 15, [2.0]) for h in artifacts.HEADS}
+    spread = {h: round(float(v[0]), 2) for h, v in per_head.items() if v is not None}
+    check("heads are not on one scale", len(set(spread.values())) == len(spread), str(spread))
+
+    check("band from the file", rank.band(0.5, b) == "Strong" and rank.band(3.0, b) == "Weak"
+          and rank.band(9.0, b) is None)
+    check("sub-resolution prints as <0.1", rank.format_pct(0.0, rank.resolution("ms")) == "<0.1")
+
+    print()
+    if FAIL:
+        print(f"{len(FAIL)} FAILED: {', '.join(FAIL)}")
+        return 1
+    print("all checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

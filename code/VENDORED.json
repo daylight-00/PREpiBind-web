@@ -1,0 +1,8 @@
+{
+ "code/scan.py": {
+  "upstream": "IMG/pipeline/scan/scan.py",
+  "sha256": "df7bbf32a967f9662e2ff94956f994cd6740825d812aeaa9581cdcb9f3602271",
+  "vendored_on": "2026-09-25",
+  "why": "the canonical compute path; PREpiBind-web is published and cannot import from the private IMG tree. check_vendored() fails loudly if the two drift."
+ }
+}
