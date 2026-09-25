@@ -1,248 +1,198 @@
-import streamlit as st
+"""Peptide x MHC-II prediction: %Rank per head, with the strong / weak bands.
+
+The number this page reports is a **percentile against a fixed background**, not a probability. The
+three heads are shown together because that is what a percentile buys: the same raw logit of 2.0 at
+length 15 is 3.30 % on MS and 0.32 % on IC50 <500 nM, so the columns only become comparable once
+they are ranks.
+"""
+import numpy as np
 import pandas as pd
-import os
-import sys
-import plotly.figure_factory as ff
-import plotly.graph_objects as go
-from app import get_models
-from app import write_st_end
+import streamlit as st
 
-models = get_models()
+import artifacts
+import chains
+import rank as rankmod
+from app import get_bands, get_chain_lists, get_engine, write_st_end
 
-utils_path = os.path.abspath('code')
-sys.path.insert(0, utils_path)
-from inference import main, load_config
+VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
+MIN_LEN, MAX_LEN = 12, 25          # accepted
+VALIDATED_LEN = (12, 21)           # img2-validated-length-range.md
+MAX_MOLECULES = 10
+MAX_PEPTIDES = 2000
 
-
-def run_prepibind(
-    df,
-    num_workers=4,
-    batch_size=128,
-    use_compile=False,
-    plot_kde=True,
-    show_top_binders=5,
-    model=None
-):
-    mhc_map = 'data/mhc_mapping.csv'
-    hla_emb_dir = 'data/emb_hla_esmc_small_0601_fp16'
-
-    config_path = 'config_demo.py'
-    config = load_config(
-        config_path,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        use_compile=use_compile,
-        test_dataframe=df,
-        hla_path=mhc_map,
-        plot=plot_kde,
-        hla_emb_dir=hla_emb_dir,
-    )
-
-    df_org = main(config, model)[['MHC_alpha', 'MHC_beta', 'Epitope']+['Score', 'Logits']]
-    cols = ['Score', 'Logits']
-    df_org[cols] = df_org[cols].apply(pd.to_numeric, errors='coerce')
-    df_out = df_org.copy()
-    if show_top_binders:
-        df_out = df_out.nlargest(int(show_top_binders), 'Score')
-    for col in cols:
-        df_out[col] = df_out[col].map(lambda x: f"{x:.5f}" if pd.notnull(x) else "")
-    return df_org, df_out
-
-def plot_plot_kde(df_epi):
-    scores = df_epi['Score'].astype(float).values
-    hist_data = [scores]
-    fig = ff.create_distplot(
-        hist_data,
-        group_labels=['Prediction'],
-        show_hist=False,
-        colors=['#29BDFD'],
-        curve_type='kde',
-    )
-    fig['data'][0]['fill'] = 'tozeroy'
-    fig.update_layout(
-        xaxis_title="Predictions",
-        yaxis_title="Density",
-        margin=dict(l=40, r=30, t=80, b=40),
-        showlegend=False,
-    )
-    fig.update_yaxes(showgrid=True, gridwidth=1)
-    fig.add_vline(
-        x=0.5,
-        line_width=2,
-        line_dash="dash",
-        line_color="#F53255",
-        annotation_text="Threshold (0.5)",
-        annotation_position="top left",
-    )
-    st.plotly_chart(fig, width="content")
-
-#%%
-# Streamlit App
-
-st.set_page_config(
-    page_title="Prediction | PREpiBind",
-    page_icon=":dna:",
-    layout="centered",
-    # initial_sidebar_state="collapsed"
-)
 st.title("Prediction")
 
-st.subheader("Input Data")
-st.markdown(
-    f"""
-    - **You can enter up to 20 samples below.**
-    - For larger datasets, please upload a CSV file.
-    - If you upload a CSV, only the first 20 rows are shown as a preview. The total sample count is also displayed.
-    """
+lists = get_chain_lists()
+bands = get_bands()
+
+# ---------------------------------------------------------------- molecule selection
+st.subheader("MHC class II molecule")
+
+loci = ["HLA-DR", "HLA-DP", "HLA-DQ", "H2"]
+locus = st.radio("Locus", loci, horizontal=True, label_visibility="collapsed")
+
+
+def _of_locus(names):
+    return [n for n in names if n.startswith(locus)]
+
+
+alpha_options = _of_locus(lists["alpha"])
+beta_options = _of_locus(lists["beta"])
+
+col_a, col_b = st.columns([1, 2])
+alpha = col_a.selectbox("α chain", alpha_options,
+                        index=alpha_options.index("HLA-DRA*01:01")
+                        if "HLA-DRA*01:01" in alpha_options else 0)
+default_beta = [b for b in ("HLA-DRB1*15:01",) if b in beta_options]
+betas = col_b.multiselect(f"β chain (up to {MAX_MOLECULES})", beta_options,
+                          default=default_beta, max_selections=MAX_MOLECULES)
+
+# Which of the chosen molecules have a precomputed background. Off-panel is the common case: the
+# two chain lists compose ~1.36 million molecules and the panel is 306 per head, so this is stated
+# before a run rather than discovered in the results.
+selected = [chains.molecule(alpha, b) for b in betas]
+off_panel = [m for m in selected if not rankmod.on_panel(artifacts.HEADLINE, m)]
+if off_panel:
+    st.warning(
+        f"**{len(off_panel)} of {len(selected)} selected molecules have no %Rank background.** "
+        "They are scored, but only a raw logit is available for them, and a raw logit is not "
+        "comparable between alleles, lengths or heads. Building a background takes about 78 s per "
+        "molecule on this server and is not yet wired in.\n\n"
+        + ", ".join(f"`{m}`" for m in off_panel[:6])
+        + (" …" if len(off_panel) > 6 else "")
+    )
+
+# ---------------------------------------------------------------- peptides
+st.subheader("Peptides")
+st.caption(
+    f"One per line, {MIN_LEN}–{MAX_LEN} residues, standard amino acids. "
+    f"Validated range is {VALIDATED_LEN[0]}–{VALIDATED_LEN[1]}; "
+    f"{VALIDATED_LEN[1] + 1}–{MAX_LEN} is scored but carries limited validation support."
 )
 
-MHC_alpha_list = st.session_state['alpha_list']
-MHC_beta_list = st.session_state['beta_list']
+tab_text, tab_csv = st.tabs(["Paste", "Upload CSV"])
+with tab_text:
+    raw = st.text_area("Peptides", height=160, label_visibility="collapsed",
+                       placeholder="GELIGILNAAKVPAD\nPKYVKQNTLKLATAA")
+with tab_csv:
+    st.caption("Columns `MHC_alpha`, `MHC_beta`, `Epitope`. Overrides the selection above.")
+    csv_file = st.file_uploader("CSV", type="csv", label_visibility="collapsed")
 
-def find_error_df(df, hard_check=True):
-    invalid_chars = df[~df['Epitope'].apply(lambda x: all(aa in "ACDEFGHIKLMNPQRSTVWYX" for aa in x.upper()))]
-    invalid_length = df[~df['Epitope'].apply(lambda x: len(x) == 15)]
-    invalid_alpha = df[~df['MHC_alpha'].isin(MHC_alpha_list)]
-    invalid_beta = df[~df['MHC_beta'].isin(MHC_beta_list)]
-    has_error = False
-    if not invalid_chars.empty:
-        st.error("Invalid characters found in Epitope column.")
-        st.dataframe(invalid_chars[['MHC_alpha', 'MHC_beta', 'Epitope']])
-        has_error = True
-    if not invalid_length.empty and hard_check:
-        st.warning("Peptides of 15 residues are preferred, although other lengths are accepted.")
-    if not invalid_alpha.empty or not invalid_beta.empty:
-        st.error("Invalid MHC alleles found.")
-        invalid_allele = pd.concat([invalid_alpha, invalid_beta], ignore_index=True)
-        st.dataframe(invalid_allele[['MHC_alpha', 'MHC_beta']])
-        has_error = True
-    return has_error
 
-if 'input_df' not in st.session_state:
-    st.session_state['input_df'] = pd.DataFrame(columns=["MHC_alpha", "MHC_beta", "Epitope"])
+def build_input():
+    """The frame to score, or (None, message). CSV wins when both are given."""
+    if csv_file is not None:
+        df = pd.read_csv(csv_file)
+        missing = {"MHC_alpha", "MHC_beta", "Epitope"} - set(df.columns)
+        if missing:
+            return None, f"CSV is missing {', '.join(sorted(missing))}."
+        return df[["MHC_alpha", "MHC_beta", "Epitope"]].copy(), None
 
-csv_file = st.file_uploader("Upload CSV", type="csv")
+    peptides = [p.strip().upper() for p in raw.splitlines() if p.strip()]
+    if not peptides:
+        return None, "Enter at least one peptide."
+    if not betas:
+        return None, "Select at least one β chain."
+    return pd.DataFrame(
+        [{"MHC_alpha": alpha, "MHC_beta": b, "Epitope": p} for b in betas for p in peptides]
+    ), None
 
-uploaded = False
-if csv_file:
-    df_csv = pd.read_csv(csv_file)
-    if all(col in df_csv.columns for col in ["MHC_alpha", "MHC_beta", "Epitope"]):
-        if not find_error_df(df_csv):
-            st.session_state['input_df'] = df_csv
-            uploaded = True
-            st.success(f"Loaded CSV with {len(df_csv)} samples.")
+
+def validate(df):
+    """Errors that stop a run, and warnings that do not."""
+    errors, warnings = [], []
+    bad_aa = df[~df.Epitope.apply(lambda p: set(p) <= VALID_AA)]
+    if not bad_aa.empty:
+        errors.append(f"{len(bad_aa)} peptides contain non-standard residues "
+                      f"(e.g. `{bad_aa.Epitope.iloc[0]}`).")
+    length = df.Epitope.str.len()
+    out_of_range = df[(length < MIN_LEN) | (length > MAX_LEN)]
+    if not out_of_range.empty:
+        errors.append(f"{len(out_of_range)} peptides fall outside {MIN_LEN}–{MAX_LEN} residues.")
+    unknown = sorted({c for c in pd.concat([df.MHC_alpha, df.MHC_beta]).unique()
+                      if not chains.known(c)})
+    if unknown:
+        errors.append(f"{len(unknown)} unrecognised chains: {', '.join(unknown[:5])}.")
+    if len(df) > MAX_PEPTIDES:
+        errors.append(f"{len(df):,} rows exceeds the {MAX_PEPTIDES:,}-row interactive limit.")
+
+    extended = int(((length > VALIDATED_LEN[1]) & (length <= MAX_LEN)).sum())
+    if extended:
+        warnings.append(f"{extended} peptides are longer than {VALIDATED_LEN[1]} residues. They are "
+                        "scored, but the training pool holds almost no negatives at those lengths, "
+                        "so their support is weak. No pooled performance figure covers them.")
+    return errors, warnings
+
+
+# ---------------------------------------------------------------- run
+if st.button("Run prediction", type="primary"):
+    df, message = build_input()
+    if df is None:
+        st.error(message)
     else:
-        st.error("CSV must contain 'MHC_alpha', 'MHC_beta', and 'Epitope' columns.")
-
-import re
-def get_mhc_prefix(mhc):
-    for prefix in ['HLA-DP', 'HLA-DQ', 'HLA-DR', 'H2']:
-        if mhc.startswith(prefix):
-            return prefix
-def get_mhc_prefixes(mhc_list):
-    return sorted(set(get_mhc_prefix(mhc)for mhc in mhc_list if get_mhc_prefix(mhc) is not None))
-all_prefixes = sorted(set(get_mhc_prefixes(MHC_alpha_list) + get_mhc_prefixes(MHC_beta_list)))
-
-def filter_by_prefix(mhc_list, prefixes):
-    return [mhc for mhc in mhc_list if any(mhc.startswith(prefix) for prefix in prefixes)]
-
-if not uploaded:
-    default_selected = all_prefixes
-    selected_prefixes = st.multiselect(
-        "Select MHC Prefixes",
-        options=all_prefixes, 
-        default=default_selected, 
-        help="Select prefixes to filter MHC alleles. If no prefix is selected, all MHC alleles will be shown."
-    )
-    filtered_alpha = filter_by_prefix(MHC_alpha_list, selected_prefixes)
-    filtered_beta = filter_by_prefix(MHC_beta_list, selected_prefixes)
-    with st.form("manual_input"):
-
-        cols = st.columns(3)
-        mhc_alpha = cols[0].selectbox("MHC alpha", filtered_alpha, index=0 if filtered_alpha else None)
-        mhc_beta = cols[1].selectbox("MHC beta", filtered_beta, index=0 if filtered_beta else None)
-        epitope = cols[2].text_input("Epitope", max_chars=25)
-        submitted = st.form_submit_button("Add Entry")
-        if epitope and not all(aa in "ACDEFGHIKLMNPQRSTVWY" for aa in epitope.upper()):
-            st.error("Epitope must contain only valid amino acids.")
-        elif submitted and mhc_alpha and mhc_beta and epitope:
-            if len(epitope) != 15:
-                st.warning("Peptides of 15 residues are preferred, although other lengths are accepted.")
-
-            new_entry = pd.DataFrame({"MHC_alpha": [mhc_alpha], "MHC_beta": [mhc_beta], "Epitope": [epitope.upper()]})
-            st.session_state['input_df'] = pd.concat([st.session_state['input_df'], new_entry], ignore_index=True)
-            # st.success("Entry added successfully. ")
-
-if not st.session_state['input_df'].empty:
-    if not uploaded:
-        st.session_state['input_df']['Delete'] = False
-        edited_df = st.data_editor(
-            st.session_state['input_df'],
-            column_config={"Delete": st.column_config.CheckboxColumn("Select")},
-            width="stretch"
-        )
-        button_cols = st.columns(2)
-        delete_selected = button_cols[0].button("Delete Selected", key="delete_selected_btn")
-        delete_all = button_cols[1].button("Delete All", key="delete_all_btn")
-        # 선택된 행 삭제
-        if delete_selected:
-            st.session_state['input_df'] = edited_df[~edited_df['Delete']].drop(columns=['Delete']).reset_index(drop=True)
-            st.rerun()
-        if delete_all:
-            st.session_state['input_df'] = pd.DataFrame(columns=["MHC_alpha", "MHC_beta", "Epitope"])
-            st.rerun()
-    else:
-        st.dataframe(st.session_state['input_df'], width="stretch")
-else:
-    st.info("No data available.")
-
-with st.expander("Options", expanded=False):
-    batch_size = 128
-    selected_model = st.selectbox("Select measurement type", ['Qualitative', 'Mass Spectrometry', 'IC50 (<500nM)', 'IC50 (<1000nM)'], index=0)
-    show_top_binders = st.selectbox("Show top binders", ['All', 5, 10, 20, 50], index=2)
-    model = models.get(selected_model, None)
-    if show_top_binders == 'All': show_top_binders = None
-    plot_kde = st.checkbox("Plot KDE", value=True)
-    use_compile = False
-
-if st.button("Run Prediction"):
-    if st.session_state['input_df'].empty:
-        st.error("No input data provided!")
-    elif not find_error_df(st.session_state['input_df'], hard_check=False):
-        with st.spinner("Running prediction..."):
-            df = st.session_state['input_df'].copy()
-            df['MHC'] = df['MHC_alpha'] + '_' + df['MHC_beta']
-            original_df, result_df = run_prepibind(
-                df,
-                batch_size=batch_size,
-                show_top_binders=show_top_binders or 0,
-                plot_kde=plot_kde,
-                use_compile=use_compile,
-                model=model
-            )
-            st.session_state['original_df'] = original_df
-            st.session_state['result_df'] = result_df
-            st.session_state['prediction_done'] = True
-        st.success("Prediction complete!")
-
-if st.session_state.get('prediction_done', False):
-    original_df = st.session_state['original_df']
-    result_df = st.session_state['result_df']
-    st.markdown("# Results")
-    if show_top_binders is None or len(original_df) <= show_top_binders:
-        pass
-    else:
-        st.markdown(f"### Top {show_top_binders} Binders")
-    st.dataframe(result_df)
-    if plot_kde:
-        score_count = original_df['Score'].unique().size
-        if score_count < 2:
-            st.warning("Not enough data to plot KDE. Passing plot.")
+        errors, warnings = validate(df)
+        for w in warnings:
+            st.warning(w)
+        if errors:
+            for e in errors:
+                st.error(e)
         else:
-            st.markdown("### Prediction Plot")
-            plot_plot_kde(original_df)
-    st.markdown("### Download Results")
-    csv = original_df.to_csv(index=False).encode()
-    st.download_button("Download result", csv, file_name="prediction.csv", mime="text/csv")
+            bar = st.progress(0.0, text="Embedding peptides…")
+            engine = get_engine()
+            result = engine.predict(
+                df, progress=lambda done, total: bar.progress(min(done / total, 1.0)))
+            bar.empty()
+            st.session_state["result"] = result
+
+# ---------------------------------------------------------------- results
+result = st.session_state.get("result")
+if result is not None:
+    st.markdown("## Results")
+
+    res = rankmod.resolution(artifacts.HEADLINE)
+    table = pd.DataFrame({
+        "Peptide": result.Epitope,
+        "α": result.MHC_alpha,
+        "β": result.MHC_beta,
+        "Length": result.length,
+    })
+    for head, label in artifacts.HEADS.items():
+        table[f"{label} %Rank"] = [rankmod.format_pct(v, res) for v in result[f"{head}_rank_pct"]]
+        table[f"{label} call"] = result[f"{head}_band"].fillna("")
+
+    headline_pct = result[f"{artifacts.HEADLINE}_rank_pct"]
+    st.dataframe(table.sort_values(
+        f"{artifacts.HEADS[artifacts.HEADLINE]} %Rank",
+        key=lambda c: headline_pct.reindex(c.index)), width="stretch", hide_index=True)
+
+    cut = bands["bands"]
+    st.caption(
+        f"**%Rank** is the percentage of a fixed 100,000-peptide background, drawn from the "
+        f"reviewed proteome and stratified by (molecule, length), that scores at least as high. "
+        f"Lower is a stronger binder, and `<{res:g}` means the grid cannot resolve further. "
+        f"**Strong** is ≤ {cut['strong_rank_pct_max']:g} %, **Weak** ≤ {cut['weak_rank_pct_max']:g} %, "
+        "matching NetMHCIIpan-4.3's installed defaults so the two are directly comparable."
+    )
+    with st.expander("What the bands were measured to do"):
+        ev = bands["evidence"]
+        st.markdown(
+            f"On the development pool ({ev['n_rows']:,} rows, lengths 12–21):\n\n"
+            f"| band | ligands recovered | negatives passed |\n|---|---|---|\n"
+            f"| Strong ≤ {cut['strong_rank_pct_max']:g} % | {ev['strong']['sensitivity']:.1%} | "
+            f"{ev['strong']['negative_rate']:.1%} |\n"
+            f"| Weak ≤ {cut['weak_rank_pct_max']:g} % | {ev['weak']['sensitivity']:.1%} | "
+            f"{ev['weak']['negative_rate']:.1%} |\n\n"
+            f"**The negatives here are matched decoys, 1:1 with the positives — not a natural "
+            f"proteome.** The passed-negative rate is therefore not a specificity, and must not be "
+            f"quoted as one. {bands['not_a_calibration']}"
+        )
+
+    if not result.on_panel.all():
+        n = int((~result.on_panel).sum())
+        st.info(f"{n} of {len(result)} rows are on a molecule with no background, so their %Rank "
+                "is blank. The raw logit is in the download.")
+
+    st.download_button("Download results (CSV)", result.to_csv(index=False).encode(),
+                       "prepibind_prediction.csv", "text/csv")
 
 write_st_end()

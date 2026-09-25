@@ -65,7 +65,14 @@ class plm_cat_mean_inf(nn.Module):
 
     def forward(self, x_hla, x_epi, mask_hla=None, mask_epi=None):
         x_hla = self.hla_self_attn(x_hla, padding_mask=mask_hla)
-        x_epi = self.epi_self_attn(x_epi, padding_mask=None)
+        x_epi = self.epi_self_attn(x_epi, padding_mask=mask_epi)
+        # img2: was `padding_mask=None`. With variable-length peptides the padded positions acted
+        # as attention keys, making a peptide's logit depend on the longest peptide in its batch.
+        # An all-False mask is equivalent to None, so this is bit-identical on 15-mer-only data and
+        # does not move the published img1 model's outputs. The img2 training model
+        # (260905/6_h100/code/model.py) carries the same fix, which is what the served checkpoints
+        # were trained with. `engine.py` batches within one length anyway, so the mask is all-False
+        # in practice; this keeps the two models identical if that ever changes.
 
         mask = torch.cat((mask_hla, mask_epi), dim=-1)
         x = torch.cat((x_hla, x_epi), dim=1)

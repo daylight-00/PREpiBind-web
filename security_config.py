@@ -1,7 +1,19 @@
 """
 Security header configuration for the PREpiBind Streamlit application.
 
-Applied headers:
+.. warning::
+   **Measured 2026-09-25 on streamlit 1.55.0 / tornado 6.5.1: this module applies NOTHING.**
+   A dev server running under it answers ``/``, ``/healthz``, ``/static/...`` and a 404 with no
+   ``X-Content-Type-Options``, no ``X-Frame-Options``, no ``Referrer-Policy``, and with ``Server:
+   TornadoServer/6.5.1`` still set. The monkey-patch below reaches ``RequestHandler.__init__``, but
+   the headers do not survive to the response.
+
+   These headers belong at the reverse proxy in any case — nginx terminates TLS in front of this
+   app, it is where HSTS has to live, and the other service on this host already sets exactly this
+   set there. The patch is left in place, and doing nothing, only so that removing it is a
+   deliberate change made together with the nginx block that replaces it.
+
+Intended headers (none of which are currently reaching a client):
   - X-Content-Type-Options: nosniff
   - X-Frame-Options: SAMEORIGIN
   - X-XSS-Protection: 1; mode=block
