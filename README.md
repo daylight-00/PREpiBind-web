@@ -8,59 +8,76 @@
 > Jang DH, Kim D, Choi Y, Lee J.
 > *TBD* (2026)
 
-A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESM C 300M protein language model embeddings. The server implements four task-specific models trained on qualitative, IC50, and mass spectrometry ligandomics data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
+A Streamlit web server for predicting peptide binding to human (HLA-DP/DQ/DR) and mouse (H2-IA/IE)
+MHC class II molecules, using ESM C 300M protein language model embeddings.
 
-**Live server:** [https://lcdd.snu.ac.kr/prepibind](https://lcdd.snu.kr/prepibind)
+This branch is **img2**, a reboot of the earlier server rather than an update of it. Three things
+differ from the version a returning user remembers, and each is a decision rather than a preference:
+
+| | img1 | **img2** |
+|---|---|---|
+| served weights | one cross-validation fold per task, three different seeds | one fit on the whole development pool at seed 42, frozen and hashed |
+| output | sigmoid score, binder at ≥ 0.5 | **%Rank** against a fixed background, per head; the binary call is a %Rank cut |
+| peptide length | trained on 15-mers | trained 12–25, validated 12–21, accepted 12–25 |
+| heads | Qualitative, MS, IC50 ×2 | MS (headline), IC50 ×2. Qualitative is retired to a clearly labelled legacy page |
+
+**PREpiBind does not outperform the established class-II predictors it was measured against.** On
+the MS head, over held-out studies and held-out molecules, it is behind NetMHCIIpan-4.3 by 0.0305
+and 0.0491 ROC-AUC with 95 % intervals excluding zero; it is at parity with MixMHC2pred-2.0 over
+held-out studies and behind over held-out molecules. The server says so on its own front page.
 
 ---
 
-## Repository Contents
+## Repository contents
 
 ```text
 PREpiBind-web/
-├── app.py                        # Entry point: model loading, session state, navigation
-├── security_config.py            # HTTP security headers via Tornado monkey-patching
-├── config_demo.py                # Inference config — Standard Mode
-├── config_demo_custom_hla.py     # Inference config — Custom HLA Mode
+├── app.py                        # entry point: navigation, cached engine, shared footer
+├── security_config.py            # HTTP security headers — SEE THE WARNING BELOW
 ├── robots.txt
-├── .streamlit/config.toml        # Streamlit server settings
+├── .streamlit/config.toml
 │
 ├── pages/
-│   ├── 0_home.py                 # Home / overview
-│   ├── 1_prediction.py           # Standard prediction interface
-│   ├── 2_evaluation.py           # Model benchmarking with labeled data
-│   ├── 3_instructions.py         # Full user guide
-│   ├── 4_about.py                # Authors, citation, licensing
-│   └── 5_custom.py               # Custom HLA sequence mode
+│   ├── 0_home.py                 # what the server is, and what it does not claim
+│   ├── 1_prediction.py           # peptide x molecule -> %Rank per head
+│   ├── 2_evaluation.py           # benchmarking a labelled set
+│   ├── 3_instructions.py         # input, output semantics, limitations
+│   ├── 4_about.py                # the full performance record
+│   ├── 4_scan.py                 # antigen scanning
+│   ├── 5_legacy.py               # the img1 checkpoints, for reproducing old numbers
+│   └── 6_custom.py               # custom HLA chains
 │
 ├── code/
-│   ├── model.py                  # Neural network architecture (plm_cat_mean_inf)
-│   ├── inference.py              # Inference pipeline and DataLoader logic
-│   ├── encoder.py                # Dataset classes for standard/custom HLA modes
-│   ├── dataprovider.py           # Data loading and MHC sequence mapping
-│   └── collate.py                # Batch collation with padding and masking
+│   ├── artifacts.py              # served checkpoints, their manifests, the %Rank bands
+│   ├── chains.py                 # which sequence and embedding a chain resolves to
+│   ├── rank.py                   # %Rank and the strong/weak bands
+│   ├── engine.py                 # one shared ESM C, the heads, scoring
+│   ├── grids.py                  # building a %Rank background on demand
+│   ├── domain.py                 # locating the binding domain in an uncatalogued chain
+│   ├── model.py                  # the architecture
+│   ├── scan.py                   # VENDORED, see below
+│   ├── selftest.py               # startup checks — run this first
+│   └── VENDORED.json
 │
-├── data/
-│   ├── mhc_mapping.csv           # 7,282 allele name → domain-trimmed sequence
-│   ├── dataset_demo.csv          # Demo input for smoke-testing
-│   ├── test.csv                  # Built-in test set — Qualitative model
-│   ├── test_ms.csv               # Built-in test set — MS model
-│   ├── test_ic50_500.csv         # Built-in test set — IC50 <500 nM model
-│   └── test_ic50_1000.csv        # Built-in test set — IC50 <1000 nM model
-│
-├── models/                       # Model checkpoints (download required; see below)
-└── outputs/                      # Prediction output directory (runtime)
+├── data/                         # symlinks into run directories; none of it is in the repo
+└── models/                       # checkpoints; none of it is in the repo
 ```
+
+### `code/scan.py` is vendored
+
+It is copied from the private research tree, where it is the module every canonical scan number was
+produced by, so that the published server and the measurement path cannot drift apart. Its hash is
+recorded in `code/VENDORED.json` and `artifacts.check_vendored()` fails loudly if the copy changes.
+Do not edit it here; edit it upstream and re-vendor.
 
 ---
 
 ## Requirements
 
-- Python ≥ 3.10
-- CUDA-enabled GPU (tested on CUDA 12.8)
+- Python ≥ 3.10, a CUDA GPU (developed on an RTX 4070 Ti, 12 GB)
 
-| Package | Version tested |
-| ------- | -------------- |
+| package | version tested |
+| --- | --- |
 | streamlit | 1.55.0 |
 | torch | 2.7.1+cu128 |
 | esm | 3.2.0 |
@@ -70,103 +87,96 @@ PREpiBind-web/
 | plotly | 6.1.2 |
 | scikit-learn | 1.7.0 |
 | h5py | 3.14.0 |
-
-Install ESM (EvolutionaryScale):
-
-```bash
-pip install esm
-```
-
-Install Flash Attention (requires CUDA toolkit and NVCC):
-
-```bash
-pip install flash-attn --no-build-isolation
-```
+| biopython | 1.85 |
 
 ---
 
-## Setup
+## Artifacts the server needs
 
-### 1. Clone the repository
+None of these are in the repository. `data/` and `models/` hold symlinks to them.
+
+| path | what it is |
+| --- | --- |
+| `models/esmc_300m_2024_12_v0_fp16.pth` | ESM C 300M, float16 |
+| `models/prepi_esmc_small_img2_{ms,ic50_500,ic50_1000}_v1.0_fp16.pth` | the three served heads, each with a `_manifest.json` beside it |
+| `data/grids/grid_b_{head}_{human,h2}.npz` | the %Rank backgrounds: 306 molecules per head |
+| `data/BANDS.json` | the strong/weak cut **and the evidence that qualifies it** |
+| `data/chain_table.csv` | the training chain table; defines 134 chains and their domain windows |
+| `data/emb_hla_chain_table_0329.h5` | the embedding store those 134 chains were trained with |
+| `data/mhc_mapping.csv` | the 7,282-chain catalogue (in the repo) |
+| `data/emb_hla_esmc_small_0601_fp16/` | per-chain embeddings for the catalogue |
+| `data/background_{human,mouse}.txt` | the 100,000-peptide proteome background |
+
+The img2 artifacts are not published yet. The img1 checkpoints and catalogue embeddings are on
+HuggingFace:
 
 ```bash
-git clone https://github.com/daylight-00/PREpiBind-web.git
-cd PREpiBind-web
-```
-
-### 2. Download model checkpoints
-
-Download from HuggingFace and place in `models/`:
-
-```bash
-# PREpiBind task-specific checkpoints
-huggingface-cli download daylight-00/prepibind-esmc-300m --local-dir models/
-
-# ESM C 300M base model (FP16)
 huggingface-cli download daylight-00/esmc-300m-2024-12 --local-dir models/
-```
-
-Expected files after download:
-
-```text
-models/
-├── esmc_300m_2024_12_v0_fp16.pth
-├── prepi_esmc_small_e5_s128_f4_fp16.pth        # Qualitative
-├── prepi_esmc_small_ms_e5_s100_f0_fp16.pth     # Mass Spectrometry
-├── prepi_esmc_small_ic50_500_e5_s128_f4_fp16.pth    # IC50 <500 nM
-└── prepi_esmc_small_ic50_1000_e5_s128_f1_fp16.pth   # IC50 <1000 nM
-```
-
-### 3. Download pre-computed HLA embeddings
-
-Pre-computed ESM C 300M embeddings for all 7,282 IPD-IMGT/HLA alleles are required for Standard Mode:
-
-```bash
 huggingface-cli download daylight-00/emb_hla_esmc_small_0601_fp16 \
-    --repo-type dataset \
-    --local-dir data/emb_hla_esmc_small_0601_fp16
+    --repo-type dataset --local-dir data/emb_hla_esmc_small_0601_fp16
 ```
 
-The embedding directory should resolve to `data/emb_hla_esmc_small_0601_fp16/`.
+### Two rules about the artifacts, both load-bearing
 
-### 4. Configure GPU
-
-The server defaults to GPU device 1 (`CUDA_VISIBLE_DEVICES=1` in `app.py` line 18). Change this to match your system before running.
+- **A %Rank grid belongs to one head, one host and one batch size.** It is a set of scores, not a
+  property of the model. `code/engine.py` pins the embedding batch size to the value the grids were
+  built at; it is not a tuning knob.
+- **The chain table wins for the 134 chains it defines; `mhc_mapping.csv` is the source for the
+  rest.** Six chains disagree between the two, and the invariant being protected is per molecule,
+  not global: the sequence that produced a query embedding and the sequence behind that molecule's
+  %Rank background must be the same one.
 
 ---
 
-## Running the Server
+## Running
 
 ```bash
-streamlit run app.py \
-    --server.port 8501 \
-    --server.baseUrlPath /prepibind
+PREPIBIND_GPU=0 streamlit run app.py --server.port 8501
+python code/selftest.py          # 19 checks: artifact hashes, the chain split, the panel, the bands
 ```
 
-The server will be available at `http://localhost:8501/prepibind`.
+`PREPIBIND_GPU` selects the CUDA device; the img1 server hardcoded device 1 in `app.py`.
 
-For production deployment behind a reverse proxy, set `--server.baseUrlPath` to match your proxy path prefix. Once TLS is configured, uncomment the HSTS header and `secure` cookie flag in `security_config.py`.
+Behind a reverse proxy, add `--server.baseUrlPath` to match the proxy prefix.
 
----
+### Security headers
 
-## Model Architecture
-
-The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA embedding (concatenated alpha + beta chain from ESM C 300M) and a tokenized peptide sequence — and processes them through:
-
-1. Separate two-block self-attention encoders for HLA and epitope representations
-2. A single joint interaction block (concatenation + self-attention)
-3. Masked mean pooling → two-layer MLP → scalar logit
-
-The output score is sigmoid-transformed; scores ≥ 0.5 indicate predicted binding.
-
-**Standard Mode** uses pre-computed embeddings stored in `data/emb_hla_esmc_small_0601_fp16/`.
-**Custom HLA Mode** computes ESM C embeddings on-the-fly for arbitrary MHC sequences not in the database (including non-human alleles such as Mamu, SLA, and BoLA).
+`security_config.py` monkey-patches Tornado to set `X-Content-Type-Options`, `X-Frame-Options` and
+`Referrer-Policy`. **Measured on streamlit 1.55.0 / tornado 6.5.1, it sets none of them** — a server
+running under it answers every path with no security header and with `Server: TornadoServer/6.5.1`
+still set. These headers belong at the reverse proxy in any case, which is where TLS terminates and
+where HSTS has to live. The module is left in place so that removing it is a deliberate change made
+together with the nginx block that replaces it.
 
 ---
 
-## Input Format
+## What the server reports
 
-**Prediction (CSV upload):**
+A **%Rank** per head: the percentage of a fixed 100,000-peptide background — drawn from the
+reviewed proteome and stratified by `(molecule, length)` — that scores at least as high. Lower is a
+stronger binder, and `<0.1` means "better than every breakpoint", not zero.
+
+**Strong ≤ 1 %, weak ≤ 5 %**, matching NetMHCIIpan-4.3's installed defaults so the two tools are
+read at the same operating point. This is a comparability choice, not a calibration. The bands are
+read from `data/BANDS.json` rather than hardcoded, because that file carries the limits with the
+numbers — in particular that its negatives are matched decoys, 1:1 with positives, **not a natural
+proteome**, so the negative rate is not a specificity.
+
+There is no probability output and no probability threshold. The three heads are not on one scale: a
+raw logit of 2.0 at length 15 is the 3.30th percentile on MS and the 0.32nd on IC50 < 500 nM, which
+is why the server reports ranks and not scores.
+
+### Molecules without a background
+
+The panel is 306 molecules per head; the two chain lists compose about 1.36 million, so an off-panel
+request is the common case. Precomputing all of it is roughly 3.4 GPU-years for one head. The server
+therefore builds a background on first request and caches it — about 150 s for one head on the
+serving card, or 306 s for all three, of which 73 s is the shared embedding pass. Until one exists
+the %Rank is left blank rather than showing a bare logit in its place.
+
+---
+
+## Input format
 
 ```csv
 MHC_alpha,MHC_beta,Epitope
@@ -174,29 +184,45 @@ HLA-DRA*01:01,HLA-DRB1*15:01,GELIGILNAAKVPAD
 HLA-DQA1*05:01,HLA-DQB1*02:01,PKYVKQNTLKLATAA
 ```
 
-**Evaluation (CSV upload with binary labels):**
+Add a `Target` column of 1/0 for the Evaluation page. Headers must match exactly and allele names
+must be in `data/mhc_mapping.csv`.
 
-```csv
-MHC_alpha,MHC_beta,Epitope,Target
-HLA-DRA*01:01,HLA-DRB1*15:01,GELIGILNAAKVPAD,1
-HLA-DQA1*05:01,HLA-DQB1*02:01,PKYVKQNTLKLATAA,0
-```
-
-Column headers must match exactly. Allele names must follow WHO HLA nomenclature and be present in `data/mhc_mapping.csv`. The model was trained on 15-mer peptides; predictions for other lengths are accepted but not validated.
+**The built-in test sets in `data/` cannot measure img2 generalisation.** Both IC50 sets are 100 %
+inside their training pool at peptide level, and `test_ms.csv` is 80.7 % of its *positives* against
+~0 % of its negatives — the asymmetry that inflates an AUC rather than merely leaking. img2's heads
+are one fit on the whole development pool, so an img1 split is not held out from them. They remain
+valid input for the legacy page, whose checkpoints they genuinely were held out from.
 
 ---
 
-## Notes on Allele Coverage
+## Custom HLA mode
 
-The server provides pre-computed ESM C embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **151 unique HLA dimers** (27 alpha × 89 beta allele combinations) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
+Paste **full-length** α and β chains. The server locates the binding domain itself by aligning to
+the catalogue chain the sequence most resembles, because a stored HLA embedding is the full-length
+chain embedded and *then* sliced — embedding a pre-trimmed window on its own is a different object.
+Measured against the catalogue path:
 
-Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for these species.
+| what the sequence becomes | ROC-AUC | mean \|Δ%Rank\| | band calls changed |
+| --- | --- | --- | --- |
+| full-length, sliced to the window *(this server)* | −0.002 | 0.45 pp | 2 % |
+| full-length, left whole *(img1)* | −0.017 | 3.01 pp | 20 % |
+| the window, embedded alone *(img1 also invited this)* | −0.111 | 14.11 pp | 39 % |
+
+The img1 analysis measured the AUC column and concluded users need not trim, which was right for a
+server reporting a sigmoid — an AUC reads order within a set. A percentile reads position against a
+background, and that is where the shift lands.
+
+---
+
+## Provenance note
+
+The served manifests record `"loader": "PREpiBind-web/code/inference.py:62"`. That file was the img1
+inference stack and is not in this branch; `code/engine.py` is its successor and loads the same way,
+`torch.load(...)["model_state_dict"]`. The manifests are frozen artifacts and are not edited.
 
 ---
 
 ## Citation
-
-If you use PREpiBind or this web server, please cite:
 
 ```bibtex
 @article{Jang2026PREpiBind,
@@ -209,11 +235,14 @@ If you use PREpiBind or this web server, please cite:
 }
 ```
 
-The ESM C 300M model is developed by EvolutionaryScale and is subject to the [Cambrian Open License Agreement](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement).
+The img2 manuscript is not yet written; a citation will be added on submission.
 
 ---
 
 ## License
 
-The PREpiBind web server source code is released under the [MIT License](LICENSE).
-ESM C 300M model weights are subject to the Cambrian Open License (EvolutionaryScale).
+MIT ([LICENSE](LICENSE)). ESM C 300M weights and embeddings derived from them are subject to the
+[Cambrian Open License](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement)
+(EvolutionaryScale).
+
+Research use only. Not for clinical or diagnostic decision-making.
