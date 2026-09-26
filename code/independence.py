@@ -67,6 +67,11 @@ def annotate(df, head="ms"):
     pmhc = _load(head, "pmhc")
     nmers = _load(head, "nmers9")
     pos, neg = _load(head, "pmhc_pos"), _load(head, "pmhc_neg")
+    # The concordant/conflicting split below is only meaningful if the training set does not carry
+    # the same pMHC under both labels. Verified 0 for all three heads at build time; checked here
+    # because the whole audit would quietly mis-report if it ever stopped being true.
+    if pos & neg:
+        raise ValueError(f"{head}: {len(pos & neg)} pMHC appear in training as both classes")
     nmers_mol = _load(head, "nmers9_mol")
     seen_mol = set(manifest()["molecules"].get(head, {}))
 
@@ -83,8 +88,10 @@ def annotate(df, head="ms"):
     # a 15-mer contributes seven of them, so this fires often and is reported, never used to reject
     out["shares_9mer"] = [bool(_nmers(p) & nmers) for p in out.Epitope]
     # A 9-mer seen against ANY molecule is sequence familiarity. A 9-mer seen against THE SAME
-    # molecule is far closer to binding-context leakage: an MHC-II core is nine residues, and the
-    # register against that groove is exactly what the head has to learn. Reported apart.
+    # molecule is a MORE SPECIFIC PROXY for it, nothing stronger: nine residues is the length of an
+    # MHC-II core, but we do not know where the core is, and the shared stretch may be flank. The
+    # two are reported apart because the second is the narrower measure, not because it is
+    # mechanistic.
     out["shares_9mer_same_molecule"] = [
         bool({f"{k}|{m}" for k in _nmers(p)} & nmers_mol)
         for p, m in zip(out.Epitope, out.molecule)]
@@ -178,6 +185,57 @@ def contact_table(annotated, target="Target"):
     return t, {"overlapping_rows": len(hit), "concordant": concordant, "conflicting": conflict}
 
 
+def paired_molecule_delta(annotated, logit, target="Target",
+                          min_per_class=5, n_boot=2000, seed=0):
+    """Full set vs each cleaned view, on the molecules eligible in BOTH.
+
+    This is the comparison `by_stratum` cannot make. Removing overlapping rows also removes whole
+    molecules from the eligible set, and an unpaired mean over per-molecule AUCs moves when that
+    set changes: three molecules at 0.9/0.8/0.5 average 0.733, and dropping the 0.5 for want of
+    rows lifts the average to 0.85 without a single prediction improving.
+
+    Pairing fixes the set, so the delta is what happened to the *same* molecules. The interval is
+    a bootstrap over molecules, which is this project's unit for a CI (`aggregation-rule.md`).
+    """
+    from sklearn.metrics import roc_auc_score
+
+    logit = np.asarray(logit, dtype=float)
+    rng = np.random.default_rng(seed)
+
+    def per_molecule(idx):
+        out = {}
+        sub = annotated.loc[idx]
+        for mol, grp in sub.groupby("molecule", sort=False):
+            g = annotated.index.get_indexer(grp.index)
+            y, sc = grp[target].to_numpy(), logit[g]
+            ok = ~np.isnan(sc)
+            y, sc = y[ok], sc[ok]
+            if (y == 1).sum() >= min_per_class and (y == 0).sum() >= min_per_class:
+                out[mol] = roc_auc_score(y, sc)
+        return out
+
+    base = per_molecule(STRATA[0][1](annotated))
+    rows = []
+    for name, sel in STRATA[1:]:
+        clean = per_molecule(sel(annotated))
+        shared = sorted(set(base) & set(clean))
+        rec = {"comparison": f"Full set -> {name}", "molecules_paired": len(shared)}
+        if shared:
+            d = np.array([clean[m] - base[m] for m in shared])
+            rec["mean_delta"] = float(d.mean())
+            rec["median_delta"] = float(np.median(d))
+            if len(shared) >= 3:
+                bs = [rng.choice(d, size=len(d), replace=True).mean() for _ in range(n_boot)]
+                lo, hi = np.percentile(bs, [2.5, 97.5])
+                rec["ci_low"], rec["ci_high"] = float(lo), float(hi)
+            rec["molecules_lost"] = len(set(base) - set(clean))
+        else:
+            rec["mean_delta"] = rec["median_delta"] = float("nan")
+            rec["molecules_lost"] = len(base)
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
 def by_stratum(annotated, logit, rank_pct=None, target="Target",
                min_rows=30, min_per_class=5):
     """Each stratum, scored three ways, because a stratum is not only cleaner — it is different.
@@ -186,9 +244,13 @@ def by_stratum(annotated, logit, rank_pct=None, target="Target",
     class balance of what is left. A pooled AUC that moves between two strata has therefore moved
     for two reasons at once, and the composition one has nothing to do with independence. So:
 
-      * **molecule-wise** is the primary figure. The allele is this project's statistical unit
-        (`aggregation-rule.md` §3), and an average over per-molecule AUCs does not move when the
-        molecule mixture does. It is the one number a reader should compare across strata.
+      * **molecule-wise** removes the *within*-molecule part of the composition shift — one
+        molecule's AUC does not depend on how many other molecules are in the table. It does
+        **not** make the column comparable across strata: the eligibility test (>= `min_per_class`
+        of each class) is re-applied per stratum, so molecules drop out as rows are removed, and
+        the mean moves when the surviving SET changes even if no molecule got better. On
+        `test_ms.csv` the set runs 41 -> 20 -> 17 -> 9 -> 8. For a comparison across strata use
+        `paired_molecule_delta`, which fixes the set first.
       * **pooled on -%Rank** is comparable across molecules and lengths by construction — that is
         what the percentile is for — but is only defined on rows whose molecule has a background,
         so its coverage is printed beside it.

@@ -275,8 +275,9 @@ if stored is not None:
         cols[4].metric("Molecule seen", f"{comp['Molecule seen in training']:.1%}")
         st.caption(
             "A 9-mer seen against *any* molecule is sequence familiarity. A 9-mer seen against "
-            "**the same** molecule is closer to binding-context leakage: an MHC-II core is nine "
-            "residues, and the register against that groove is what the head has to learn."
+            "**the same** molecule is a narrower proxy for it — nine residues is the length of an "
+            "MHC-II core, but the core's position is unknown here and the shared stretch may be "
+            "flank. It is the more specific measure, not a mechanistic one."
         )
 
         asym = independence.asymmetry(audit)
@@ -323,12 +324,33 @@ if stored is not None:
                 "rank_coverage": "%Rank cov.", "pooled_auc_logit": "Pooled AUC (logit)",
                 "pooled_ap_logit": "Pooled PR-AUC (logit)"}),
             hide_index=True, width="stretch")
+        paired = independence.paired_molecule_delta(audit, logit)
+        st.markdown("**Same molecules, before and after**")
+        st.dataframe(
+            paired.rename(columns={
+                "comparison": "Comparison", "molecules_paired": "Molecules paired",
+                "mean_delta": "Mean ΔAUC", "median_delta": "median",
+                "ci_low": "CI low", "ci_high": "CI high",
+                "molecules_lost": "Molecules dropped"}),
+            hide_index=True, width="stretch")
+        st.caption(
+            "This is the comparison the table above cannot make. Removing overlapping rows also "
+            "removes whole molecules from the eligible set, and a mean over per-molecule AUCs "
+            "moves when that set changes even if no molecule got better — three molecules at "
+            "0.9 / 0.8 / 0.5 average 0.733, and losing the 0.5 for want of rows lifts the average "
+            "to 0.85 with nothing improved. Pairing fixes the set first, so the delta is what "
+            "happened to the **same** molecules; the interval is a bootstrap over molecules. "
+            "**Molecules dropped** is information too: a view that is clean because it is empty "
+            "has told you something about the upload, not about the model."
+        )
+
         st.caption(
             "**Read the molecule-wise column.** Dropping overlapping rows also changes which "
             "molecules, which lengths and which class balance are left, so a *pooled* figure that "
             "moves between views has moved for two reasons at once — and the composition one says "
             "nothing about independence. An average over per-molecule AUCs does not move when the "
-            "molecule mixture does, and the allele is this project's statistical unit. The pooled "
+            "molecule mixture *within* a molecule does — but it is still not comparable across "
+            "strata, which is what the paired table above is for. The pooled "
             "−%Rank column is comparable across molecules by construction but is defined only "
             "where a background exists, so its coverage is printed; the pooled logit column is the "
             "one the rest of this page reports, kept here as a diagnostic.  \n"
