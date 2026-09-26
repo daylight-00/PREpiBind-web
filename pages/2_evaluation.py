@@ -266,11 +266,18 @@ if stored is not None:
             "This is PREpiBind's lineage only; it says nothing about whether your set is "
             "independent of any other predictor."
         )
-        cols = st.columns(4)
+        cols = st.columns(5)
         cols[0].metric("Exact peptide seen", f"{comp['Exact peptide seen in training']:.1%}")
         cols[1].metric("Peptide + MHC seen", f"{comp['Exact peptide + MHC seen']:.1%}")
-        cols[2].metric("Shares a 9-mer", f"{comp['Shares a 9-mer with training']:.1%}")
-        cols[3].metric("Molecule seen", f"{comp['Molecule seen in training']:.1%}")
+        cols[2].metric("9-mer, same molecule",
+                       f"{comp['Shares a 9-mer on the same molecule']:.1%}")
+        cols[3].metric("9-mer, any molecule", f"{comp['Shares a 9-mer with training']:.1%}")
+        cols[4].metric("Molecule seen", f"{comp['Molecule seen in training']:.1%}")
+        st.caption(
+            "A 9-mer seen against *any* molecule is sequence familiarity. A 9-mer seen against "
+            "**the same** molecule is closer to binding-context leakage: an MHC-II core is nine "
+            "residues, and the register against that groove is what the head has to learn."
+        )
 
         asym = independence.asymmetry(audit)
         if asym is not None:
@@ -280,29 +287,54 @@ if stored is not None:
             st.dataframe(show.style.format({"Positives": "{:.1%}", "Negatives": "{:.1%}",
                                             "Gap": "{:+.1%}"}),
                          hide_index=True, width="stretch")
+            contact = independence.contact_table(audit)
+            if contact is not None:
+                tbl, summ = contact
+                if summ["overlapping_rows"]:
+                    st.markdown("**Where the exact peptide + MHC hits came from**")
+                    st.dataframe(tbl, hide_index=True, width="stretch")
+                    conflict = summ["conflicting"] / summ["overlapping_rows"]
+                    if conflict >= 0.10:
+                        st.warning(
+                            f"{conflict:.0%} of the overlapping rows carry the **opposite** label "
+                            "in training. Those rows do not measure memory, they measure which of "
+                            "two disagreeing sources the model follows — a different problem, and "
+                            "one a single overlap rate would have hidden."
+                        )
             if worst >= 0.10:
                 st.warning(
-                    f"Overlap differs by label by up to {worst:.0%}. A metric on this set is "
-                    "then partly a memory test: the model can score the overlapping class from "
-                    "having seen it. Read the strata below, not the pooled figure."
+                    f"Overlap differs by label by up to {worst:.0%}. Where that overlap is "
+                    "concordant, a metric on this set is partly a memory test: the model can "
+                    "score the overlapping class from having seen it. Read the strata below, "
+                    "not the pooled figure."
                 )
             else:
                 st.caption("Overlap is balanced across labels. That does not make the set "
                            "independent — it means the overlap is not, on its own, tilting the "
                            "metric toward one class.")
 
-        strata = independence.by_stratum(audit, logit)
+        strata = independence.by_stratum(
+            audit, logit, rank_pct=scored[f"{head}_rank_pct"].to_numpy())
         st.dataframe(
-            strata.rename(columns={"stratum": "View", "rows": "Rows", "positives": "Pos",
-                                   "negatives": "Neg", "roc_auc": "ROC-AUC",
-                                   "average_precision": "PR-AUC"}),
+            strata.rename(columns={
+                "stratum": "View", "rows": "Rows", "positives": "Pos", "negatives": "Neg",
+                "molecules": "Mol", "molecule_mean_auc": "Molecule-wise AUC (mean)",
+                "molecule_median_auc": "median", "pooled_auc_rank": "Pooled AUC (−%Rank)",
+                "rank_coverage": "%Rank cov.", "pooled_auc_logit": "Pooled AUC (logit)",
+                "pooled_ap_logit": "Pooled PR-AUC (logit)"}),
             hide_index=True, width="stretch")
         st.caption(
-            "Each view drops one more kind of contact with training data; the last two are "
-            "orthogonal cuts rather than a continuation of the series. **The information is in "
-            "the gap between the views, not in any single one.** A view that loses most of the "
-            "rows also loses most of the precision of its estimate, which is why the counts are "
-            "printed beside the metric."
+            "**Read the molecule-wise column.** Dropping overlapping rows also changes which "
+            "molecules, which lengths and which class balance are left, so a *pooled* figure that "
+            "moves between views has moved for two reasons at once — and the composition one says "
+            "nothing about independence. An average over per-molecule AUCs does not move when the "
+            "molecule mixture does, and the allele is this project's statistical unit. The pooled "
+            "−%Rank column is comparable across molecules by construction but is defined only "
+            "where a background exists, so its coverage is printed; the pooled logit column is the "
+            "one the rest of this page reports, kept here as a diagnostic.  \n"
+            "The last two views are orthogonal cuts, not a continuation of the series. **The "
+            "information is in the gap between views, not in any single one**, and a view that "
+            "loses most of the rows loses most of the precision of its estimate."
         )
         st.download_button("Download the independence audit (CSV)",
                            audit.to_csv(index=False).encode(),

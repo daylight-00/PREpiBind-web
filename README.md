@@ -200,6 +200,18 @@ The lineage index is per head. Pooling the three answers a different question: `
 negatives show 36.6 % peptide+MHC overlap against a pooled index and **0.0 %** against the MS head's
 own, since the IC50 arms contain them.
 
+**The molecule-wise column is the one to read.** Dropping overlapping rows also changes which
+molecules, lengths and class balance remain, so a pooled figure that moves between views has moved
+for two reasons at once. An average over per-molecule AUCs does not move when the molecule mixture
+does. A pooled −%Rank column is given beside it (comparable across molecules by construction,
+defined only where a background exists) and the pooled logit is kept as a labelled diagnostic.
+
+Exact peptide+MHC hits are broken out as a 2×2 against the **training** label, because a test
+positive that was a training positive is a memory test while one that was a training *decoy* is a
+contradiction, and a single overlap rate hides the difference. 9-mer overlap is reported twice:
+against any molecule (sequence familiarity) and against the **same** molecule, which is far closer
+to binding-context leakage since an MHC-II core is nine residues.
+
 This checks PREpiBind's lineage only. It says nothing about whether a set is independent of
 NetMHCIIpan or MixMHC2pred, whose training data we do not have.
 
