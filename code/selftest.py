@@ -4,6 +4,7 @@ Each check is one thing that has silently broken before, or that a decision says
 integrity of the served weights, the vendored compute path, the chain-table split, the panel size,
 and that the bands come from the file rather than from prose.
 """
+import io
 import os
 import re
 import sys
@@ -13,7 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import artifacts
 import chains
 import rank
+import support
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 FAIL = []
 
 
@@ -109,6 +112,37 @@ def main():
     check("band from the file", rank.band(0.5, b) == "Strong" and rank.band(3.0, b) == "Weak"
           and rank.band(9.0, b) is None)
     check("sub-resolution prints as <0.1", rank.format_pct(0.0, rank.resolution("ms")) == "<0.1")
+
+    # `img2-server-output-contract` §5 forbids the training-support block from reading as a
+    # reliability tier. The wording is part of the contract, so it is checked, not trusted.
+    if support.available("ms"):
+        d = support._load("ms")
+        check("support: reference population is the %Rank panel",
+              len(d["reference"]) == len(rank.molecules("ms")),
+              f"{len(d['molecules'])} training molecules, "
+              f"{len(d['reference'])} reference molecules")
+        check("support: reference distances sorted and non-negative",
+              bool((d["reference"] >= 0).all())
+              and bool((d["reference"][1:] >= d["reference"][:-1]).all()))
+        seen = support.describe("HLA-DRA*01:01", "HLA-DRB1*01:01")
+        check("support: a training molecule reports no percentile",
+              seen is not None and seen["seen"] and seen["percentile"] is None,
+              "at distance zero it is tied with every other training molecule")
+        check("support: length bands follow the validated range",
+              (support.length_support(12), support.length_support(21),
+               support.length_support(22), support.length_support(26))
+              == ("validated", "validated", "limited-validation", "outside"))
+        banned = ("reliab", "confiden", "high support", "low support", "good support",
+                  "poor support", "excellent", "weak support", "strong support")
+        rendered = [support.DISCLAIMER] + [f"{a} {b}" for a, b in
+                    support.rows("HLA-DRA*01:01", "HLA-DRB5*01:01", lengths=(15, 23))]
+        rendered += [support.length_support(n) for n in (12, 22, 30)]
+        bad = [s for s in rendered
+               if any(w in s.lower() for w in banned) and "not a confidence estimate" not in s]
+        check("support: no reliability wording in what is rendered", not bad,
+              "a tier the evidence does not carry is the one falsifiable claim on the page")
+    else:
+        check("support: artifact present", False, "data/support/ms_support.npz missing")
 
     print()
     if FAIL:

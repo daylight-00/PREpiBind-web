@@ -12,6 +12,7 @@ import streamlit as st
 import artifacts
 import chains
 import rank as rankmod
+import support
 from app import get_bands, get_chain_lists, get_engine, write_st_end
 
 VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
@@ -215,6 +216,22 @@ if result is not None:
             f"proteome.** The passed-negative rate is therefore not a specificity, and must not be "
             f"quoted as one. {bands['not_a_calibration']}"
         )
+
+    # ---------------------------------------------------------------- training support
+    # `img2-server-output-contract` §5: facts about how well supported the molecule is, and
+    # nothing that reads as a confidence. Track D found the distance-performance association is
+    # cross-locus and did not validate a mapping to expected performance, so there is no tier,
+    # no colour and no expected-AUC band here -- by contract, not by omission.
+    if support.available("ms"):
+        with st.expander("Training support"):
+            lengths = sorted({len(p) for p in result.Epitope.astype(str)})
+            for a, b in sorted({(r.MHC_alpha, r.MHC_beta) for r in result.itertuples()}):
+                rows = support.rows(a, b, lengths=lengths)
+                if not rows:
+                    continue
+                st.markdown(f"**{chains.molecule(a, b)}**")
+                st.markdown("\n".join(f"- {label}: {value}" for label, value in rows))
+            st.caption(support.DISCLAIMER)
 
     if not result.on_panel.all():
         n = int((~result.on_panel).sum())
