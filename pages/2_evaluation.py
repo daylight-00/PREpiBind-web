@@ -29,6 +29,7 @@ from sklearn.metrics import (average_precision_score, precision_recall_curve, ro
 
 import artifacts
 import chains
+import independence
 from app import get_bands, get_engine, write_st_end
 
 VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
@@ -246,6 +247,66 @@ if stored is not None:
         "additionally moves with the positive rate of the uploaded set, so it is comparable only "
         "against a set of the same balance."
     )
+
+    # ------------------------------------------------------------ independence
+    # The reason this section exists: the server's own built-in MS test set overlaps 80.7% of its
+    # POSITIVES against 0.0% of its negatives. A pooled ROC-AUC cannot show that, and reading the
+    # file will not either.
+    st.subheader("Independence from training")
+    if not independence.available():
+        st.info("The training-lineage index is not installed, so independence cannot be checked. "
+                "Every number on this page should then be read as an upper bound.")
+    else:
+        audit = independence.annotate(scored, head)
+        comp = independence.composition(audit)
+        st.caption(
+            f"Checked against what the **{label}** head was fitted on — "
+            f"{independence.manifest()['heads'][head]['rows']:,} rows, "
+            f"{independence.manifest()['heads'][head]['molecules']} molecules. "
+            "This is PREpiBind's lineage only; it says nothing about whether your set is "
+            "independent of any other predictor."
+        )
+        cols = st.columns(4)
+        cols[0].metric("Exact peptide seen", f"{comp['Exact peptide seen in training']:.1%}")
+        cols[1].metric("Peptide + MHC seen", f"{comp['Exact peptide + MHC seen']:.1%}")
+        cols[2].metric("Shares a 9-mer", f"{comp['Shares a 9-mer with training']:.1%}")
+        cols[3].metric("Molecule seen", f"{comp['Molecule seen in training']:.1%}")
+
+        asym = independence.asymmetry(audit)
+        if asym is not None:
+            worst = float(asym.gap.abs().max())
+            show = asym.rename(columns={"overlap": "Overlap", "positives": "Positives",
+                                        "negatives": "Negatives", "gap": "Gap"})
+            st.dataframe(show.style.format({"Positives": "{:.1%}", "Negatives": "{:.1%}",
+                                            "Gap": "{:+.1%}"}),
+                         hide_index=True, width="stretch")
+            if worst >= 0.10:
+                st.warning(
+                    f"Overlap differs by label by up to {worst:.0%}. A metric on this set is "
+                    "then partly a memory test: the model can score the overlapping class from "
+                    "having seen it. Read the strata below, not the pooled figure."
+                )
+            else:
+                st.caption("Overlap is balanced across labels. That does not make the set "
+                           "independent — it means the overlap is not, on its own, tilting the "
+                           "metric toward one class.")
+
+        strata = independence.by_stratum(audit, logit)
+        st.dataframe(
+            strata.rename(columns={"stratum": "View", "rows": "Rows", "positives": "Pos",
+                                   "negatives": "Neg", "roc_auc": "ROC-AUC",
+                                   "average_precision": "PR-AUC"}),
+            hide_index=True, width="stretch")
+        st.caption(
+            "Each view drops one more kind of contact with training data; the last two are "
+            "orthogonal cuts rather than a continuation of the series. **The information is in "
+            "the gap between the views, not in any single one.** A view that loses most of the "
+            "rows also loses most of the precision of its estimate, which is why the counts are "
+            "printed beside the metric."
+        )
+        st.download_button("Download the independence audit (CSV)",
+                           audit.to_csv(index=False).encode(),
+                           file_name="independence_audit.csv", mime="text/csv")
 
     # ------------------------------------------------------------ molecule-wise
     st.subheader("Molecule-wise")

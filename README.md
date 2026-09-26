@@ -54,6 +54,7 @@ PREpiBind-web/
 │   ├── engine.py                 # one shared ESM C, the heads, scoring
 │   ├── grids.py                  # building a %Rank background on demand
 │   ├── domain.py                 # locating the binding domain in an uncatalogued chain
+│   ├── independence.py           # is an uploaded set independent of the training lineage?
 │   ├── model.py                  # the architecture
 │   ├── scan.py                   # VENDORED, see below
 │   ├── selftest.py               # startup checks — run this first
@@ -104,6 +105,7 @@ None of these are in the repository. `data/` and `models/` hold symlinks to them
 | `data/chain_table.csv` | the training chain table; defines 134 chains and their domain windows |
 | `data/emb_hla_chain_table_0329.h5` | the embedding store those 134 chains were trained with |
 | `data/mhc_mapping.csv` | the 7,282-chain catalogue (in the repo) |
+| `data/lineage/` | per-head training-lineage index for the independence audit |
 | `data/emb_hla_esmc_small_0601_fp16/` | per-chain embeddings for the catalogue |
 | `data/background_{human,mouse}.txt` | the 100,000-peptide proteome background |
 
@@ -186,6 +188,20 @@ HLA-DQA1*05:01,HLA-DQB1*02:01,PKYVKQNTLKLATAA
 
 Add a `Target` column of 1/0 for the Evaluation page. Headers must match exactly and allele names
 must be in `data/mhc_mapping.csv`.
+
+### Independence from training
+
+The Evaluation page audits an uploaded set against **what the served head was fitted on** — exact
+peptide, exact peptide+MHC, any shared 9-mer, molecule seen/unseen, length support — and recomputes
+the metric on each progressively cleaner view. Overlap is reported **split by label**, because that
+is the failure mode that actually distorts a number.
+
+The lineage index is per head. Pooling the three answers a different question: `test_ms.csv`'s
+negatives show 36.6 % peptide+MHC overlap against a pooled index and **0.0 %** against the MS head's
+own, since the IC50 arms contain them.
+
+This checks PREpiBind's lineage only. It says nothing about whether a set is independent of
+NetMHCIIpan or MixMHC2pred, whose training data we do not have.
 
 **The built-in test sets in `data/` cannot measure img2 generalisation.** Both IC50 sets are 100 %
 inside their training pool at peptide level, and `test_ms.csv` is 80.7 % of its *positives* against

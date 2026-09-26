@@ -48,3 +48,6 @@ ENV/
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── training-lineage index for the independence audit ───────────────────────
+data/lineage/
