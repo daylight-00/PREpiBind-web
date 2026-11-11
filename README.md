@@ -20,8 +20,7 @@ A Streamlit-based web server for predicting peptide binding to human and mouse M
 PREpiBind-web/
 ├── app.py                        # Entry point: model loading, session state, navigation
 ├── security_config.py            # HTTP security headers via Tornado monkey-patching
-├── config_demo.py                # Inference config — Standard Mode
-├── config_demo_custom_hla.py     # Inference config — Custom HLA Mode
+├── pyproject.toml, uv.lock       # Environment (uv)
 ├── robots.txt
 ├── .streamlit/config.toml        # Streamlit server settings
 │
@@ -35,9 +34,8 @@ PREpiBind-web/
 │
 ├── code/
 │   ├── model.py                  # Neural network architecture (plm_cat_mean_inf)
-│   ├── inference.py              # Inference pipeline and DataLoader logic
-│   ├── encoder.py                # Dataset classes for standard/custom HLA modes
-│   ├── dataprovider.py           # Data loading and MHC sequence mapping
+│   ├── embedder.py               # ESM C 300M epitope/HLA embedder (loads the released checkpoint)
+│   ├── engine.py                 # Inference engine: four heads on one ESM C, HLA store, batching, scores
 │   └── collate.py                # Batch collation with padding and masking
 │
 ├── data/
@@ -56,42 +54,35 @@ PREpiBind-web/
 
 ## Requirements
 
-- Python ≥ 3.10
-- CUDA-enabled GPU (tested on CUDA 12.8)
+- Python ≥ 3.14
+- NVIDIA GPU with a current driver. PyTorch brings its own CUDA 13 runtime; no CUDA toolkit or nvcc is needed
+- [uv](https://docs.astral.sh/uv/)
 
-| Package | Version tested |
+The environment is declared in `pyproject.toml` and locked in `uv.lock`:
+
+| Package | Version locked |
 | ------- | -------------- |
-| streamlit | 1.55.0 |
-| torch | 2.7.1+cu128 |
-| esm | 3.2.0 |
-| flash-attn | 2.8.0.post2 |
-| numpy | 2.3.0 |
-| pandas | 2.3.0 |
-| plotly | 6.1.2 |
-| scikit-learn | 1.7.0 |
-| h5py | 3.14.0 |
+| python | 3.15.2 |
+| streamlit | 1.67.0 |
+| torch | 2.15.0 |
+| esm | 3.4.3 |
+| numpy | 2.5.4 |
+| pandas | 3.1.1 |
+| plotly | 7.1.0 |
+| scikit-learn | 1.9.1 |
 
-Install ESM (EvolutionaryScale):
-
-```bash
-pip install esm
-```
-
-Install Flash Attention (requires CUDA toolkit and NVCC):
-
-```bash
-pip install flash-attn --no-build-isolation
-```
+Attention runs through PyTorch's fused scaled-dot-product attention; flash-attn is not used.
 
 ---
 
 ## Setup
 
-### 1. Clone the repository
+### 1. Clone the repository and create the environment
 
 ```bash
 git clone https://github.com/daylight-00/PREpiBind-web.git
 cd PREpiBind-web
+uv sync
 ```
 
 ### 2. Download model checkpoints
@@ -131,21 +122,23 @@ The embedding directory should resolve to `data/emb_hla_esmc_small_0601_fp16/`.
 
 ### 4. Configure GPU
 
-The server defaults to GPU device 1 (`CUDA_VISIBLE_DEVICES=1` in `app.py` line 18). Change this to match your system before running.
+The server uses the first GPU that CUDA exposes. To use another one, set `CUDA_VISIBLE_DEVICES` when starting it (for example `CUDA_VISIBLE_DEVICES=1`).
 
 ---
 
 ## Running the Server
 
 ```bash
-streamlit run app.py \
+uv run streamlit run app.py \
     --server.port 8501 \
     --server.baseUrlPath /prepibind
 ```
 
 The server will be available at `http://localhost:8501/prepibind`.
 
-For production deployment behind a reverse proxy, set `--server.baseUrlPath` to match your proxy path prefix. Once TLS is configured, uncomment the HSTS header and `secure` cookie flag in `security_config.py`.
+For production deployment behind a reverse proxy, set `--server.baseUrlPath` to match your proxy path prefix.
+
+`security_config.py` adds its security headers by patching Tornado. Current Streamlit serves through Starlette and uvicorn and does not install Tornado, so on this stack the patch only logs a warning and the headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, the cookie flags) are not sent. Until it is ported (Streamlit's `st.App` takes ASGI middleware), set them at the reverse proxy.
 
 ---
 
