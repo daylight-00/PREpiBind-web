@@ -1,0 +1,22 @@
+[project]
+name = "prepibind-web"
+version = "0"
+description = "PREpiBind web server: the img1 baseline model, with everything around it kept current"
+requires-python = ">=3.14"
+dependencies = [
+    "torch",
+    "numpy",
+    "pandas",
+    "plotly",
+    "scikit-learn",
+    "streamlit",
+    "esm",
+]
+
+[tool.uv]
+# One host class: Linux x86_64 with an NVIDIA GPU. Without this uv also solves win32/arm splits that have nothing to do with the server.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# The host has a driver and no CUDA toolkit; the backend selector installs torch with its own CUDA 13 runtime wheels (same as 260919/2_speed/envs/next).
+torch-backend = "cu130"
+# flash-attn has no wheel for current torch and the host has no nvcc: never build it.
+no-build-package = ["flash-attn"]
