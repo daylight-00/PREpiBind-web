@@ -84,7 +84,7 @@ class UnifiedModel(nn.Module):
         self.model = model
 
     def forward(self, x_hla, x_epi, mask_hla, mask_epi):
-        x_epi_emb = self.model_esm(x_epi).embeddings[:, 1:-1, :]  # strip [CLS] and [SEP] tokens
+        x_epi_emb = self.model_esm(x_epi)[:, 1:-1, :]  # strip [CLS] and [SEP] tokens
         y_pred = self.model(x_hla, x_epi_emb, mask_hla, mask_epi)
         return y_pred
 
@@ -96,9 +96,9 @@ class UnifiedModel_custom_hla(nn.Module):
         self.model = model
 
     def forward(self, x_hla_a, x_hla_b, x_epi, mask_hla_a, mask_hla_b, mask_epi):
-        x_epi_emb = self.model_esm(x_epi).embeddings[:, 1:-1, :]
-        x_hla_a_emb = self.model_esm(x_hla_a).embeddings[:, 1:-1, :]
-        x_hla_b_emb = self.model_esm(x_hla_b).embeddings[:, 1:-1, :]
+        x_epi_emb = self.model_esm(x_epi)[:, 1:-1, :]
+        x_hla_a_emb = self.model_esm(x_hla_a)[:, 1:-1, :]
+        x_hla_b_emb = self.model_esm(x_hla_b)[:, 1:-1, :]
         x_hla = torch.cat((x_hla_a_emb, x_hla_b_emb), dim=1)
         mask_hla = torch.cat((mask_hla_a, mask_hla_b), dim=1)
         y_pred = self.model(x_hla, x_epi_emb, mask_hla, mask_epi)

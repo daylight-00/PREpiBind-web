@@ -1,19 +1,11 @@
 import streamlit as st
 import pandas as pd
-import os
-import sys
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
 from sklearn.metrics import roc_auc_score, roc_curve, f1_score, balanced_accuracy_score, precision_score, precision_recall_curve, auc, matthews_corrcoef
 
-from app import get_models
+from app import predict
 from app import write_st_end
-
-models = get_models()
-
-utils_path = os.path.abspath('code')
-sys.path.insert(0, utils_path)
-from inference import main, load_config
 
 st.set_page_config(
     page_title="Evaluation | PREpiBind",
@@ -27,7 +19,6 @@ For detailed instruction, see [Instructions](/prepibind/instructions#evaluation-
 """)
             
 selected_model = st.selectbox("Select measurement type", ['Qualitative', 'Mass Spectrometry', 'IC50 (<500nM)', 'IC50 (<1000nM)'], index=0)
-model = models.get(selected_model, None)
 df_path = st.session_state.data_paths.get(selected_model, None)
 
 csv_file_eval = st.file_uploader("Upload CSV", type="csv", key="csv_upload")
@@ -51,34 +42,6 @@ else:
     st.download_button("Download original test set", csv, file_name, "text/csv", key="download_test_set")
     st.dataframe(df_csv, width="stretch")
 df_csv['MHC'] = df_csv['MHC_alpha'] + '_' + df_csv['MHC_beta']
-
-def run_prepibind(
-    df,
-    num_workers=4,
-    batch_size=128,
-    use_compile=False,
-    plot_kde=True,
-    show_top_binders=5,
-    model=None
-):
-    mhc_map = 'data/mhc_mapping.csv'
-    hla_emb_dir = 'data/emb_hla_esmc_small_0601_fp16'
-
-    config_path = 'config_demo.py'
-    config = load_config(
-        config_path,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        use_compile=use_compile,
-        test_dataframe=df,
-        hla_path=mhc_map,
-        plot=plot_kde,
-        hla_emb_dir=hla_emb_dir,
-    )
-
-    df_org = main(config, model)
-    cols = ['Score', 'Logits']
-    return df_org
 
 custom_palette = ["#FFAF00", "#F46920", "#F53255", "#F857C1", "#29BDFD", "#00CBBF", "#01C159", "#9DCA1C"]
 
@@ -171,10 +134,7 @@ def plot_plot(df_epi):
 
 if st.button("Run Prediction"):
     with st.spinner("Running prediction..."):
-        original_df = run_prepibind(
-            df=df_csv,
-            model=model
-        )
+        original_df = predict(df_csv, selected_model)
     st.success("Prediction complete!")
     st.markdown("# Results")
     st.dataframe(original_df, width="stretch")

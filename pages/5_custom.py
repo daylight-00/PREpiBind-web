@@ -1,44 +1,18 @@
 import streamlit as st
 import pandas as pd
-import os
-import sys
-import plotly.figure_factory as ff
 import plotly.graph_objects as go
-from app import get_models
+from app import predict
 from app import write_st_end
-
-models = get_models()
-
-utils_path = os.path.abspath('code')
-sys.path.insert(0, utils_path)
-from inference import main, load_config
+from plots import kde_figure
 
 
 def run_prepibind(
     df,
-    num_workers=4,
     batch_size=128,
-    use_compile=False,
-    plot_kde=True,
     show_top_binders=5,
-    model=None
+    head=None
 ):
-    mhc_map = 'data/mhc_mapping.csv'
-    hla_emb_dir = 'data/emb_hla_esmc_small_0601_fp16'
-
-    config_path = 'config_demo_custom_hla.py'
-    config = load_config(
-        config_path,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        use_compile=use_compile,
-        test_dataframe=df,
-        hla_path=mhc_map,
-        plot=plot_kde,
-        hla_emb_dir=hla_emb_dir,
-    )
-
-    df_org = main(config, model)[['MHC_alpha', 'MHC_beta', 'Epitope']+['Score', 'Logits']]
+    df_org = predict(df, head, custom=True, batch_size=batch_size)[['MHC_alpha', 'MHC_beta', 'Epitope']+['Score', 'Logits']]
     cols = ['Score', 'Logits']
     df_org[cols] = df_org[cols].apply(pd.to_numeric, errors='coerce')
     df_out = df_org.copy()
@@ -49,32 +23,7 @@ def run_prepibind(
     return df_org, df_out
 
 def plot_plot_kde(df_epi):
-    scores = df_epi['Score'].astype(float).values
-    hist_data = [scores]
-    fig = ff.create_distplot(
-        hist_data,
-        group_labels=['Prediction'],
-        show_hist=False,
-        colors=['#29BDFD'],
-        curve_type='kde',
-    )
-    fig['data'][0]['fill'] = 'tozeroy'
-    fig.update_layout(
-        xaxis_title="Predictions",
-        yaxis_title="Density",
-        margin=dict(l=40, r=30, t=80, b=40),
-        showlegend=False,
-    )
-    fig.update_yaxes(showgrid=True, gridwidth=1)
-    fig.add_vline(
-        x=0.5,
-        line_width=2,
-        line_dash="dash",
-        line_color="#F53255",
-        annotation_text="Threshold (0.5)",
-        annotation_position="top left",
-    )
-    st.plotly_chart(fig, width="content")
+    st.plotly_chart(kde_figure(df_epi['Score'].astype(float).values), width="content")
 
 #%%
 # Streamlit App
@@ -173,16 +122,12 @@ if not st.session_state['input_df'].empty:
 else:
     st.info("No data available.")
 
-from app import get_single_custom_model
-
 with st.expander("Options", expanded=False):
     batch_size = 128
     selected_model = st.selectbox("Select measurement type", ['Qualitative', 'Mass Spectrometry', 'IC50 (<500nM)', 'IC50 (<1000nM)'], index=0)
     show_top_binders = st.selectbox("Show top binders", ['All', 5, 10, 20, 50], index=2)
-    model = get_single_custom_model(selected_model)
     if show_top_binders == 'All': show_top_binders = None
     plot_kde = st.checkbox("Plot KDE", value=True)
-    use_compile = False
 
 if st.button("Run Prediction"):
     if st.session_state['input_df'].empty:
@@ -195,9 +140,7 @@ if st.button("Run Prediction"):
                 df,
                 batch_size=batch_size,
                 show_top_binders=show_top_binders or 0,
-                plot_kde=plot_kde,
-                use_compile=use_compile,
-                model=model
+                head=selected_model
             )
             st.session_state['original_df'] = original_df
             st.session_state['result_df'] = result_df

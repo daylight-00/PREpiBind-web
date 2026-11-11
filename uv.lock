@@ -1085,6 +1085,7 @@ dependencies = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "streamlit" },
     { name = "torch" },
 ]
@@ -1096,6 +1097,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "streamlit" },
     { name = "torch" },
 ]

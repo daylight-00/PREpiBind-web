@@ -1,53 +1,33 @@
 import streamlit as st
 from security_config import apply_security
 apply_security()
-import torch
-from esm.tokenization import get_esmc_model_tokenizers
-from esm.models.esmc import ESMC
 import pandas as pd
 import re
 
 import os, sys
+from pathlib import Path
 utils_path = os.path.abspath('code')
 sys.path.insert(0, utils_path)
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-from model import UnifiedModel, plm_cat_mean_inf
+from engine import Engine
 
-model_args = {
-    "hla_dim": 960,
-    "epi_dim": 960,
-    "head_div": 64,
-}
 @st.cache_resource(show_spinner="Loading models...")
-def get_models():
-    esm_chkp_path = "models/esmc_300m_2024_12_v0_fp16.pth"
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    def load_unified_model(esm_chkp_path, chkp_path, device, use_compile=False):
-        model_esm = ESMC(
-            d_model=960,
-            n_heads=15,
-            n_layers=30,
-            tokenizer=get_esmc_model_tokenizers(),
-            use_flash_attn=True,
-        )
-        dtype = torch.float16
-        model_esm.load_state_dict(torch.load(esm_chkp_path, map_location=device, weights_only=False))
-        model_esm.to(device, dtype=dtype).eval()
-        model = plm_cat_mean_inf(**model_args)
-        model.load_state_dict(torch.load(chkp_path, map_location=device, weights_only=False)['model_state_dict'])
-        model.to(device, dtype=dtype).eval()
-        unified_model = UnifiedModel(model_esm, model).to(device).eval()
-        if use_compile:
-            unified_model = torch.compile(unified_model)
-        return unified_model
-    use_compile = True
-    models = {
-        "Qualitative": load_unified_model(esm_chkp_path, "models/prepi_esmc_small_e5_s128_f4_fp16.pth", device, use_compile=use_compile),
-        "Mass Spectrometry": load_unified_model(esm_chkp_path, "models/prepi_esmc_small_ms_e5_s100_f0_fp16.pth", device, use_compile=use_compile),
-        "IC50 (<500nM)": load_unified_model(esm_chkp_path, "models/prepi_esmc_small_ic50_500_e5_s128_f4_fp16.pth", device, use_compile=use_compile),
-        "IC50 (<1000nM)": load_unified_model(esm_chkp_path, "models/prepi_esmc_small_ic50_1000_e5_s128_f1_fp16.pth", device, use_compile=use_compile),
-    }
-    return models
+def get_engine():
+    engine = Engine(root=Path(__file__).resolve().parent)
+    engine.hla.preload()
+    return engine
+
+def predict(df, head, custom=False, batch_size=128):
+    """Run the engine on `df` with a progress bar; `custom` takes the HLA chains as sequences instead of allele names."""
+    bar, text = st.progress(0), st.empty()
+    def show(done, total):
+        percent = int(done / total * 100)
+        bar.progress(percent)
+        text.text(f"{percent}%")
+    engine = get_engine()
+    out = (engine.run_custom if custom else engine.run)(df, head, batch_size=batch_size, progress=show)
+    bar.empty()
+    text.empty()
+    return out
 
 def natural_key(s):
     return [int(text) if text.isdigit() else text for text in re.split(r'(\d+)', s)]
@@ -72,46 +52,7 @@ st.markdown("""
 	}
 </style>""", unsafe_allow_html=True)
 
-models = get_models()
-
-@st.cache_resource(show_spinner="Loading custom model...")
-def get_single_custom_model(model_name):
-    """Load only the selected model to conserve GPU memory."""
-    esm_chkp_path = "models/esmc_300m_2024_12_v0_fp16.pth"
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    model_paths = {
-        "Qualitative": "models/prepi_esmc_small_e5_s128_f4_fp16.pth",
-        "Mass Spectrometry": "models/prepi_esmc_small_ms_e5_s100_f0_fp16.pth",
-        "IC50 (<500nM)": "models/prepi_esmc_small_ic50_500_e5_s128_f4_fp16.pth",
-        "IC50 (<1000nM)": "models/prepi_esmc_small_ic50_1000_e5_s128_f1_fp16.pth",
-    }
-    
-    from model import UnifiedModel_custom_hla, plm_cat_mean_inf
-    model_args = {
-        "hla_dim": 960,
-        "epi_dim": 960,
-        "head_div": 64,
-    }
-    
-    model_esm = ESMC(
-        d_model=960,
-        n_heads=15,
-        n_layers=30,
-        tokenizer=get_esmc_model_tokenizers(),
-        use_flash_attn=True,
-    )
-    dtype = torch.float16
-    model_esm.load_state_dict(torch.load(esm_chkp_path, map_location=device, weights_only=False))
-    model_esm.to(device, dtype=dtype).eval()
-    
-    model = plm_cat_mean_inf(**model_args)
-    model.load_state_dict(torch.load(model_paths[model_name], map_location=device)['model_state_dict'])
-    model.to(device, dtype=dtype).eval()
-    
-    unified_model = UnifiedModel_custom_hla(model_esm, model).to(device).eval()
-    # use_compile=False for custom models to avoid compatibility issues
-    return unified_model
+engine = get_engine()
 
 if "data_paths" not in st.session_state:
     st.session_state.data_paths = {

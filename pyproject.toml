@@ -9,6 +9,7 @@ dependencies = [
     "pandas",
     "plotly",
     "scikit-learn",
+    "scipy",
     "streamlit",
     "esm",
 ]
