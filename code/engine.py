@@ -18,6 +18,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from esm.tokenization import EsmSequenceTokenizer
 from esm.utils import encoding
@@ -29,6 +30,7 @@ from model import UnifiedModel, UnifiedModel_custom_hla, plm_cat_mean_inf
 
 ESM_CHECKPOINT = "esmc_300m_2024_12_v0_fp16.pth"
 HLA_DIR = "data/emb_hla_esmc_small_0601_fp16"
+CATALOGUE = "data/mhc_mapping.csv"  # allele name, full chain sequence and the domain window [start_idx, end_idx) the stored embedding was cut to
 HEAD_CHECKPOINTS = {
     "Qualitative": "prepi_esmc_small_e5_s128_f4_fp16.pth",
     "Mass Spectrometry": "prepi_esmc_small_ms_e5_s100_f0_fp16.pth",
@@ -74,6 +76,14 @@ class HlaStore:
             self.chain(name)
 
 
+def chain_name_map(catalogue):
+    """Chain sequence -> the first allele of the catalogue (columns HLA_Name, HLA_Seq) with that sequence."""
+    names = {}
+    for name, sequence in zip(catalogue.HLA_Name, catalogue.HLA_Seq):
+        names.setdefault(sequence, name)
+    return names
+
+
 class FastUnavailable(Exception):
     """The fast path cannot take this request; the message says why."""
 
@@ -111,6 +121,7 @@ class Engine:
         root = Path(root)
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.hla = HlaStore(root / HLA_DIR)
+        self.chain_names = chain_name_map(pd.read_csv(root / CATALOGUE, usecols=["HLA_Name", "HLA_Seq"]))  # Custom Mode scores a chain of the catalogue as Standard Mode scores the allele
         self.embedder = load_embedder(root / "models" / ESM_CHECKPOINT, self.device)
         heads = {name: self._load_head(root / "models" / file) for name, file in HEAD_CHECKPOINTS.items()}
         self.models = {name: UnifiedModel(self.embedder, head).eval() for name, head in heads.items()}
@@ -267,10 +278,33 @@ class Engine:
         return out
 
     def run_custom(self, df, head, batch_size=128, progress=None):
-        """The same for HLA chains given as sequences: MHC = '<alpha sequence>_<beta sequence>'. The chains are embedded on the fly with the same ESM C."""
-        rows = df.dropna(subset=["MHC", "Epitope"])
-        check_request(rows["Epitope"], (chain for pair in rows["MHC"].unique() for chain in pair.split("_")))
-        return self._run(df, self.custom_models[head], self._custom_batch, batch_size, progress)
+        """The same for HLA chains given as sequences: MHC = '<alpha sequence>_<beta sequence>'. A pair of chains that are both in the allele catalogue (the same sequence) is scored exactly as Standard
+        Mode scores the two alleles: their stored embeddings, and the fast path when it can take the request. A pair with any other chain is embedded on the fly over its full length, as it always was; that is
+        not what the model was trained on (a domain of 58-82 residues) and its result is not validated. Returns a copy with Logits, Score and `HLA chains` ('catalogue' or 'full chain');
+        `result.attrs['engine']` names the path or paths that ran."""
+        out = df.dropna(subset=["MHC", "Epitope"]).copy()
+        pairs = [pair.split("_") for pair in out["MHC"]]
+        check_request(out["Epitope"], (chain for pair in {tuple(p) for p in pairs} for chain in pair))
+        names = [tuple(self.chain_names.get(chain.strip().upper()) for chain in pair) for pair in pairs]
+        known = np.array([all(pair) for pair in names], dtype=bool)
+        out["HLA chains"] = np.where(known, "catalogue", "full chain")
+        logits, paths, offset = np.empty(len(out), dtype=np.float16), [], 0
+        for selected, catalogued in ((known, True), (~known, False)):
+            count = int(selected.sum())
+            if not count:
+                continue
+            tick = None if progress is None else (lambda done, total, o=offset, c=count: progress(o + int(c * done / total), len(out)))
+            part = out[selected]
+            if catalogued:
+                result = self.run(part.assign(MHC=["_".join(pair) for pair, k in zip(names, known) if k]), head, batch_size, tick)
+            else:
+                result = self._run(part, self.custom_models[head], self._custom_batch, batch_size, tick)
+            logits[selected] = result["Logits"].to_numpy()
+            paths.append(result.attrs["engine"])
+            offset += count
+        out["Logits"], out["Score"] = logits, score(logits)
+        out.attrs["engine"] = "+".join(dict.fromkeys(paths))
+        return out
 
     def _run(self, df, model, make_batch, batch_size, progress):
         out = df.dropna(subset=["MHC", "Epitope"]).copy()

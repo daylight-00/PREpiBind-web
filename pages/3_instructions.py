@@ -82,7 +82,8 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 
 **Custom HLA Mode:**
 - Accepts full-length or domain-trimmed MHC α and β chain sequences as direct input (up to 300 residues per chain; the longest chain of the allele catalogue has 285)
-- Embeddings are computed on-the-fly; processing time is longer than Standard Mode
+- A chain whose sequence is in the allele catalogue is scored exactly as Standard Mode scores that allele: a pair of two such chains gives the same result as selecting the two alleles, at the same speed. The result table says so in the column `HLA chains` (`catalogue`)
+- Any other chain is embedded on-the-fly over its full length; processing time is longer than Standard Mode. This is not what the model was trained on (its HLA input is a domain of 58-82 residues), so the result is not validated and is marked `full chain`
 - Required for alleles absent from the server database, including non-human primate (*Macaca mulatta*, Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study
 
 ---

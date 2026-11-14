@@ -13,7 +13,7 @@ def run_prepibind(
     show_top_binders=5,
     head=None
 ):
-    df_org = predict(df, head, custom=True, batch_size=batch_size)[['MHC_alpha', 'MHC_beta', 'Epitope']+['Score', 'Logits']]
+    df_org = predict(df, head, custom=True, batch_size=batch_size)[['MHC_alpha', 'MHC_beta', 'Epitope', 'HLA chains']+['Score', 'Logits']]
     cols = ['Score', 'Logits']
     df_org[cols] = df_org[cols].apply(pd.to_numeric, errors='coerce')
     df_out = df_org.copy()
@@ -162,6 +162,11 @@ if st.session_state.get('prediction_done', False):
     original_df = st.session_state['original_df']
     result_df = st.session_state['result_df']
     st.markdown("# Results")
+    n_full = int((original_df['HLA chains'] == 'full chain').sum())
+    if len(original_df) - n_full:
+        st.info(f"{len(original_df) - n_full} of {len(original_df)} rows: both HLA chains are in the allele catalogue and were scored exactly as Standard Mode scores these alleles (column 'HLA chains': catalogue).")
+    if n_full:
+        st.warning(f"{n_full} of {len(original_df)} rows contain an HLA chain that is not in the allele catalogue. They were run on the full chain, which is not what the model was trained on (a domain of 58-82 residues), and are not validated (column 'HLA chains': full chain).")
     if show_top_binders is None or len(original_df) <= show_top_binders:
         pass
     else:

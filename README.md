@@ -181,7 +181,7 @@ The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA e
 The output score is sigmoid-transformed; scores ≥ 0.5 indicate predicted binding.
 
 **Standard Mode** uses pre-computed embeddings stored in `data/emb_hla_esmc_small_0601_fp16/`.
-**Custom HLA Mode** computes ESM C embeddings on-the-fly for arbitrary MHC sequences not in the database (including non-human alleles such as Mamu, SLA, and BoLA).
+**Custom HLA Mode** takes the HLA chains as sequences. A pair of chains that are both in the allele catalogue (`data/mhc_mapping.csv`, the same sequence) is scored exactly as Standard Mode scores the two alleles (the stored embeddings and, where it can, the fast path; the result table says `catalogue` in the column `HLA chains`). Any other chain (including non-human alleles such as Mamu, SLA, and BoLA) is embedded on-the-fly with ESM C over its full length, as before; that is not what the model was trained on (its HLA input is a domain of 58-82 residues), the result is marked `full chain` and is not validated.
 
 ---
 

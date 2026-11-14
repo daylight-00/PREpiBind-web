@@ -50,6 +50,29 @@ def test_a_gpu_out_of_memory_in_the_fast_path_is_served_by_the_exact_path(real, 
     assert result.attrs["engine"] == "exact" and (result.Logits.to_numpy() == expected.Logits.to_numpy()).all()
 
 
+def sequences(rows):
+    """The same request with the HLA chains as sequences (Custom Mode's input)."""
+    chain = pd.read_csv(ROOT / "data" / "mhc_mapping.csv").set_index("HLA_Name").HLA_Seq
+    return pd.DataFrame({"MHC": [chain[a] + "_" + chain[b] for a, b in (m.split("_") for m in rows.MHC)], "Epitope": rows.Epitope})
+
+
+def test_custom_mode_equals_standard_mode_for_chains_of_the_catalogue(real, rows):
+    custom, standard = real.run_custom(sequences(rows), "Qualitative"), real.run(rows, "Qualitative")
+    assert (custom["HLA chains"] == "catalogue").all()
+    assert (custom.Logits.to_numpy() == standard.Logits.to_numpy()).all()
+
+
+def test_a_chain_outside_the_catalogue_keeps_the_full_chain_run_and_is_labelled(real, rows):
+    frame = sequences(rows.iloc[:20]).reset_index(drop=True)
+    alpha, beta = frame.MHC[0].split("_")
+    frame.loc[0, "MHC"] = alpha[:40] + ("A" if alpha[40] != "A" else "G") + alpha[41:] + "_" + beta  # one residue changed: no longer the catalogue's chain
+    result = real.run_custom(frame, "Qualitative")
+    assert list(result["HLA chains"]) == ["full chain"] + ["catalogue"] * 19
+    assert result.attrs["engine"] == "fast+exact"  # the catalogue rows ran on the fast path, the changed chain on the legacy exact path
+    legacy = real._run(frame.iloc[:1], real.custom_models["Qualitative"], real._custom_batch, 128, None)
+    assert result.Logits.iloc[0] == legacy.Logits.iloc[0]
+
+
 def test_a_refused_request_leaves_the_engine_usable(real, rows):
     long = rows.copy()
     long.loc[long.index[0], "Epitope"] = "A" * (engine.MAX_EPITOPE_LENGTH + 1)
