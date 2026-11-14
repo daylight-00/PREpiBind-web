@@ -16,15 +16,18 @@ def get_engine():
     engine.hla.preload()
     return engine
 
-def predict(df, head, custom=False, batch_size=128):
-    """Run the engine on `df` with a progress bar; `custom` takes the HLA chains as sequences instead of allele names."""
+def predict(df, head, custom=False, batch_size=128, windows=None):
+    """Run the engine on `df` with a progress bar; `custom` takes the HLA chains as sequences instead of allele names, `windows` ({chain: (start, end)}) the domain windows the user chose for them."""
     bar, text = st.progress(0), st.empty()
     def show(done, total):
         percent = int(done / total * 100)
         bar.progress(percent)
         text.text(f"{percent}%")
     engine = get_engine()
-    out = (engine.run_custom if custom else engine.run)(df, head, batch_size=batch_size, progress=show)
+    if custom:
+        out = engine.run_custom(df, head, batch_size=batch_size, progress=show, windows=windows)
+    else:
+        out = engine.run(df, head, batch_size=batch_size, progress=show)
     bar.empty()
     text.empty()
     return out

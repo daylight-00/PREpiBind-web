@@ -13,6 +13,8 @@ rows of one epitope length, and executes the three kinds of graph as TensorRT fp
 an error; `exact` = never load the plans. Custom mode is always exact.
 """
 import contextlib
+import functools
+import hashlib
 import os
 import threading
 from pathlib import Path
@@ -26,6 +28,7 @@ from esm.utils import encoding
 import trt_engines
 from collate import pad_and_mask_collate_fn_inf, pad_and_mask_collate_fn_inf_custom_hla
 from embedder import load_embedder
+from locator import Locator, tier
 from model import UnifiedModel, UnifiedModel_custom_hla, plm_cat_mean_inf
 
 ESM_CHECKPOINT = "esmc_300m_2024_12_v0_fp16.pth"
@@ -84,6 +87,19 @@ def chain_name_map(catalogue):
     return names
 
 
+class OverlayStore:
+    """The HLA store plus the domain embeddings made for one request (chains that are not in the catalogue): `chain(name)` looks in the request's own first. Nothing is added to the shared store."""
+
+    def __init__(self, base, extra):
+        self.base, self.extra = base, extra
+
+    def chain(self, name):
+        return self.extra[name] if name in self.extra else self.base.chain(name)
+
+
+MIN_WINDOW = 20  # residues: a domain window shorter than this is not a domain (the catalogue's are 58-82)
+
+
 class FastUnavailable(Exception):
     """The fast path cannot take this request; the message says why."""
 
@@ -121,7 +137,10 @@ class Engine:
         root = Path(root)
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.hla = HlaStore(root / HLA_DIR)
-        self.chain_names = chain_name_map(pd.read_csv(root / CATALOGUE, usecols=["HLA_Name", "HLA_Seq"]))  # Custom Mode scores a chain of the catalogue as Standard Mode scores the allele
+        catalogue = pd.read_csv(root / CATALOGUE, usecols=["HLA_Name", "HLA_Seq", "start_idx", "end_idx"])
+        self.chain_names = chain_name_map(catalogue)  # Custom Mode scores a chain of the catalogue as Standard Mode scores the allele
+        self.domain_windows = dict(zip(catalogue.HLA_Name, zip(catalogue.start_idx.astype(int), catalogue.end_idx.astype(int))))
+        self._catalogue, self._locator, self._locator_lock = catalogue, None, threading.Lock()  # the locator (a 4-mer index of the catalogue) is built when a chain outside the catalogue first needs it
         self.embedder = load_embedder(root / "models" / ESM_CHECKPOINT, self.device)
         heads = {name: self._load_head(root / "models" / file) for name, file in HEAD_CHECKPOINTS.items()}
         self.models = {name: UnifiedModel(self.embedder, head).eval() for name, head in heads.items()}
@@ -144,14 +163,15 @@ class Engine:
         head.load_state_dict(torch.load(path, map_location="cpu", weights_only=True)["model_state_dict"])
         return head.to(self.device, dtype=torch.float16).eval()
 
-    def run(self, df, head, batch_size=128, progress=None, mode=None):
+    def run(self, df, head, batch_size=128, progress=None, mode=None, store=None):
         """Predict every row of `df` with the named head. Columns: MHC = '<alpha allele>_<beta allele>' (names in the HLA store) and Epitope.
         Returns a copy with Logits (float16) and Score (float64) added; rows lacking MHC or Epitope are dropped, as in the baseline.
         `progress(batches_done, batches_total)` is called after every batch. `mode` overrides the engine's (auto, fast, exact) for this call;
         `result.attrs['engine']` says which path ran ('fast' or 'exact'). In `auto` the exact path takes over, and the log says so for the cases that are not obvious, when the plans do not
         cover the request (epitope length, HLA pair length, more than MAX_PAIRS distinct pairs), when the GPU runs out of memory, when TensorRT produces a non-finite logit,
-        and (for the rest of the process) when TensorRT fails while running."""
+        and (for the rest of the process) when TensorRT fails while running. `store` replaces the engine's HLA store for this call (Custom Mode's OverlayStore)."""
         mode = mode or self.mode
+        store = store or self.hla
         if mode not in ("auto", "fast", "exact"):
             raise ValueError(f"mode must be auto, fast or exact, not {mode!r}")
         check_request(df["Epitope"].dropna())
@@ -160,7 +180,7 @@ class Engine:
             try:
                 if self.plans is None:
                     raise FastUnavailable(self.plans_note)
-                return self._run_fast(df, head, batch_size, progress)
+                return self._run_fast(df, head, batch_size, progress, store)
             except FastUnavailable:
                 if mode == "fast":
                     raise
@@ -176,13 +196,13 @@ class Engine:
         if out_of_memory:
             torch.cuda.empty_cache()  # the tensors of the failed request are released now that its exception is gone
             print("engine: the fast path ran out of GPU memory; this request runs on the exact path", flush=True)
-        return self._run(df, self.models[head], self._standard_batch, batch_size, progress)
+        return self._run(df, self.models[head], functools.partial(self._standard_batch, store=store), batch_size, progress)
 
     def _device_scope(self):
         """The engine's GPU as the current CUDA device: TensorRT contexts, the scratch buffer and the outputs are created on the current device."""
         return torch.cuda.device(self.device) if self.device.type == "cuda" else contextlib.nullcontext()
 
-    def _run_fast(self, df, head, batch_size, progress):
+    def _run_fast(self, df, head, batch_size, progress, store):
         """Distinct epitopes through ESM C, distinct HLA pairs through the head's HLA encoder, then the joint blocks, in batches of rows of one epitope length (no padding
         of the epitope side); the logits go back to the rows' order. The memory of a request is bounded whatever its size: the epitope embeddings are held in blocks of at most
         EMBEDDING_BUDGET bytes (rows are ordered by their epitope), at most MAX_PAIRS distinct pairs are encoded at once and their embeddings are built chunk by chunk.
@@ -198,7 +218,7 @@ class Engine:
         if len(pairs) > MAX_PAIRS:
             raise FastUnavailable(f"{len(pairs)} distinct HLA pairs are more than the fast engine takes at once ({MAX_PAIRS})")
         chains = [pair.split("_") for pair in pairs]
-        pair_width = max(max(len(self.hla.chain(a)) + len(self.hla.chain(b)) for a, b in chains), trt_engines.HLA_LEN[0])
+        pair_width = max(max(len(store.chain(a)) + len(store.chain(b)) for a, b in chains), trt_engines.HLA_LEN[0])
         if pair_width > trt_engines.HLA_LEN[1]:
             raise FastUnavailable(f"an HLA pair of {pair_width} residues is longer than the fast engine's {trt_engines.HLA_LEN[1]}")
         distinct = {}  # length -> the distinct epitopes of that length; an epitope's position in its list decides its block and its row in the block
@@ -228,7 +248,7 @@ class Engine:
             hla = torch.zeros(len(pairs), pair_width, 960, dtype=torch.float16, device=dev)
             hla_mask = torch.ones(len(pairs), pair_width, dtype=torch.bool, device=dev)
             for i in range(0, len(pairs), step):
-                chunk = [torch.cat([self.hla.chain(a), self.hla.chain(b)]) for a, b in chains[i:i + step]]
+                chunk = [torch.cat([store.chain(a), store.chain(b)]) for a, b in chains[i:i + step]]
                 width = max(max(map(len, chunk)), trt_engines.HLA_LEN[0])
                 x = torch.zeros(len(chunk), width, 960, dtype=torch.float16)
                 mask = torch.ones(len(chunk), width, dtype=torch.bool)
@@ -277,26 +297,82 @@ class Engine:
         out.attrs["engine"] = "fast"
         return out
 
-    def run_custom(self, df, head, batch_size=128, progress=None):
-        """The same for HLA chains given as sequences: MHC = '<alpha sequence>_<beta sequence>'. A pair of chains that are both in the allele catalogue (the same sequence) is scored exactly as Standard
-        Mode scores the two alleles: their stored embeddings, and the fast path when it can take the request. A pair with any other chain is embedded on the fly over its full length, as it always was; that is
-        not what the model was trained on (a domain of 58-82 residues) and its result is not validated. Returns a copy with Logits, Score and `HLA chains` ('catalogue' or 'full chain');
-        `result.attrs['engine']` names the path or paths that ran."""
+    @property
+    def locator(self):
+        with self._locator_lock:
+            if self._locator is None:
+                self._locator = Locator.from_catalogue(self._catalogue)
+            return self._locator
+
+    def chain_report(self, chain):
+        """What Custom Mode makes of one HLA chain: its tier ('catalogue', 'located', 'low confidence' or 'no domain'), the nearest allele of the catalogue, the identity with it over its domain and the window
+        of the chain's domain (positions in the chain, half-open; None for 'no domain', also when the located window is shorter than MIN_WINDOW). `hit` is the locator's own result."""
+        chain = chain.strip().upper()
+        name = self.chain_names.get(chain)
+        if name:
+            start, end = self.domain_windows[name]
+            return {"tier": "catalogue", "nearest": name, "identity": 1.0, "start": start, "end": end, "hit": None}
+        hit = self.locator.locate(chain)
+        if hit is None:
+            return {"tier": "no domain", "nearest": None, "identity": 0.0, "start": None, "end": None, "hit": None}
+        found = tier(hit["identity"]) if hit["end"] - hit["start"] >= MIN_WINDOW else "no domain"
+        window = (None, None) if found == "no domain" else (hit["start"], hit["end"])
+        return {"tier": found, "nearest": hit["nearest"], "identity": hit["identity"], "start": window[0], "end": window[1], "hit": hit}
+
+    def _plan(self, chain, windows):
+        """What one normalised chain gets: ('catalogue', name), ('manual window', start, end, None), ('located' or 'low confidence', start, end, hit) or ('full chain',)."""
+        if chain in self.chain_names:
+            return ("catalogue", self.chain_names[chain])
+        if chain in windows:
+            start, end = windows[chain]
+            if not 0 <= start < end <= len(chain) or end - start < MIN_WINDOW:
+                raise RequestRefused(f"the domain window {start + 1}-{end} is not inside the chain of {len(chain)} residues or is shorter than {MIN_WINDOW} residues")
+            return ("manual window", start, end, None)
+        report = self.chain_report(chain)
+        return ("full chain",) if report["tier"] == "no domain" else (report["tier"], report["start"], report["end"], report["hit"])
+
+    def _domain_embedding(self, chain, start, end, hit):
+        """The embedding of the domain [start, end) of `chain` as the model was trained on it: the whole chain through ESM C, with the nearest chain's flanks added where a located chain has less of them
+        (`hit`; a window the user gave is cut as it is), then the domain's positions. Float16 on the CPU, like the stored embeddings."""
+        grafted, offset = self.locator.complete_flanks(chain, hit) if hit else (chain, 0)
+        tokens = torch.as_tensor(tokenize(grafted), dtype=torch.long).unsqueeze(0).to(self.device)
+        with torch.inference_mode():
+            embedding = self.embedder(tokens)[0]
+        return embedding[1 + offset + start:1 + offset + end].to("cpu", torch.float16)
+
+    def run_custom(self, df, head, batch_size=128, progress=None, windows=None):
+        """The same for HLA chains given as sequences: MHC = '<alpha sequence>_<beta sequence>'. The model's HLA input is the domain of a chain (58-82 residues) cut from the embedding of the whole chain, so:
+        a chain of the allele catalogue (the same sequence) is scored as Standard Mode scores the allele; any other chain has its domain located by alignment to the catalogue and is embedded on the fly with
+        that window cut out (with the nearest chain's flanks added where the chain has fewer); `windows` ({chain: (start, end)}, 0-based, half-open) replaces the located window of a chain. A chain with no
+        domain found (identity with the nearest catalogue chain below 0.4) and no window given keeps the legacy run over its full length, which is not validated. Returns a copy with Logits, Score and
+        `HLA chains`: catalogue, located, low confidence (identity 0.4 to 0.5), manual window or full chain, the worst of the two chains' tiers; `result.attrs['engine']` names the path or paths that ran."""
         out = df.dropna(subset=["MHC", "Epitope"]).copy()
-        pairs = [pair.split("_") for pair in out["MHC"]]
+        pairs = [[chain.strip().upper() for chain in pair.split("_")] for pair in out["MHC"]]
         check_request(out["Epitope"], (chain for pair in {tuple(p) for p in pairs} for chain in pair))
-        names = [tuple(self.chain_names.get(chain.strip().upper()) for chain in pair) for pair in pairs]
-        known = np.array([all(pair) for pair in names], dtype=bool)
-        out["HLA chains"] = np.where(known, "catalogue", "full chain")
+        windows = {chain.strip().upper(): window for chain, window in (windows or {}).items()}
+        plans = {chain: self._plan(chain, windows) for chain in dict.fromkeys(chain for pair in pairs for chain in pair)}
+        worst = {"full chain": 4, "low confidence": 3, "manual window": 2, "located": 1, "catalogue": 0}
+        out["HLA chains"] = [max((plans[chain][0] for chain in pair), key=worst.__getitem__) for pair in pairs]
+        full = (out["HLA chains"] == "full chain").to_numpy()
+        names, extra = {}, {}  # chain -> its name in the store; the embeddings made for this request
+        for chain, plan in plans.items():
+            if plan[0] == "catalogue":
+                names[chain] = plan[1]
+            elif plan[0] != "full chain":
+                _, start, end, hit = plan
+                names[chain] = f"custom:{hashlib.sha1(f'{chain}:{start}:{end}'.encode()).hexdigest()[:12]}"
+                if names[chain] not in extra:
+                    extra[names[chain]] = self._domain_embedding(chain, start, end, hit)
         logits, paths, offset = np.empty(len(out), dtype=np.float16), [], 0
-        for selected, catalogued in ((known, True), (~known, False)):
+        for selected, sliced in ((~full, True), (full, False)):
             count = int(selected.sum())
             if not count:
                 continue
             tick = None if progress is None else (lambda done, total, o=offset, c=count: progress(o + int(c * done / total), len(out)))
             part = out[selected]
-            if catalogued:
-                result = self.run(part.assign(MHC=["_".join(pair) for pair, k in zip(names, known) if k]), head, batch_size, tick)
+            if sliced:
+                named = ["_".join(names[chain] for chain in pair) for pair, keep in zip(pairs, selected) if keep]
+                result = self.run(part.assign(MHC=named), head, batch_size, tick, store=OverlayStore(self.hla, extra) if extra else None)
             else:
                 result = self._run(part, self.custom_models[head], self._custom_batch, batch_size, tick)
             logits[selected] = result["Logits"].to_numpy()
@@ -323,9 +399,10 @@ class Engine:
         out.attrs["engine"] = "exact"
         return out
 
-    def _standard_batch(self, mhc, epitope):
+    def _standard_batch(self, mhc, epitope, store=None):
+        store = store or self.hla
         chains = (name.split("_") for name in mhc)
-        return pad_and_mask_collate_fn_inf([(torch.cat([self.hla.chain(a), self.hla.chain(b)], dim=0), tokenize(e)) for (a, b), e in zip(chains, epitope)])
+        return pad_and_mask_collate_fn_inf([(torch.cat([store.chain(a), store.chain(b)], dim=0), tokenize(e)) for (a, b), e in zip(chains, epitope)])
 
     def _custom_batch(self, mhc, epitope):
         chains = (name.split("_") for name in mhc)

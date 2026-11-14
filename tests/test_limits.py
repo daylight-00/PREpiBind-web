@@ -1,8 +1,7 @@
 """The hard limits: an epitope of more than MAX_EPITOPE_LENGTH residues and an HLA chain of more than MAX_CHAIN_LENGTH residues are refused, by the engine, before anything is computed."""
+import engine
 import pandas as pd
 import pytest
-
-import engine
 
 
 def test_an_epitope_at_the_limit_is_accepted():

@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
 import trt_engines
 
 HEADS = ["Qualitative", "Mass Spectrometry"]

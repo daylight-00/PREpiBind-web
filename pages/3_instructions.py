@@ -83,7 +83,8 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 **Custom HLA Mode:**
 - Accepts full-length or domain-trimmed MHC α and β chain sequences as direct input (up to 300 residues per chain; the longest chain of the allele catalogue has 285)
 - A chain whose sequence is in the allele catalogue is scored exactly as Standard Mode scores that allele: a pair of two such chains gives the same result as selecting the two alleles, at the same speed. The result table says so in the column `HLA chains` (`catalogue`)
-- Any other chain is embedded on-the-fly over its full length; processing time is longer than Standard Mode. This is not what the model was trained on (its HLA input is a domain of 58-82 residues), so the result is not validated and is marked `full chain`
+- Any other chain: the model reads the domain of an HLA chain (58-82 residues) cut from the embedding of the whole chain, so the domain is located by alignment to the allele catalogue. The nearest allele, the identity with it and the window are listed in a table under the input, where Start and End (residue numbers from 1) can be corrected; the chain is embedded on-the-fly and the domain cut out. A domain pasted without its flanks gets the nearest chain's flanks added. The column `HLA chains` says `located` (identity 0.5 or more with the nearest catalogue chain), `low confidence` (0.4 to 0.5: check the window) or `manual window`. Measured with every catalogue chain treated as unknown and its own entry or its whole gene hidden from the search, full chains differ from Standard Mode in 0.3 to 0.4 % of the signs and domains pasted alone in 0.5 to 2.7 % (against 8 % for the earlier full-chain run)
+- A chain with no domain found (identity below 0.4: not an MHC class II chain, or too far from the catalogue) is embedded over its full length unless you enter Start and End; that is not what the model was trained on, so the result is not validated and is marked `full chain`
 - Required for alleles absent from the server database, including non-human primate (*Macaca mulatta*, Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study
 
 ---
@@ -121,7 +122,7 @@ The **Scan** page scores every window of a protein against a panel of HLA class 
 | `Epitope` | Input peptide sequence |
 | `Score` | Sigmoid-transformed binding probability (0–1) |
 | `Logits` | Pre-sigmoid model output (linear scale) |
-| `HLA chains` | Custom Mode only: `catalogue` (both chains are in the allele catalogue and were scored as Standard Mode scores them) or `full chain` (not validated, see Prediction Modes) |
+| `HLA chains` | Custom Mode only, the worst of the two chains: `catalogue` (scored as Standard Mode scores the allele), `located` (domain found by alignment), `low confidence` (identity 0.4 to 0.5), `manual window` (Start and End given by you) or `full chain` (no domain found, not validated); see Prediction Modes |
 
 Results are sorted by descending `Score`. A score ≥ 0.5 is the default positive binding threshold, consistent with a sigmoid output; users should calibrate thresholds for their specific experimental context.
 

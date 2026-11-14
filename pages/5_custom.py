@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from app import get_engine
 from app import predict
 from app import write_st_end
 from engine import MAX_CHAIN_LENGTH, MAX_EPITOPE_LENGTH
@@ -11,9 +12,10 @@ def run_prepibind(
     df,
     batch_size=128,
     show_top_binders=5,
-    head=None
+    head=None,
+    windows=None
 ):
-    df_org = predict(df, head, custom=True, batch_size=batch_size)[['MHC_alpha', 'MHC_beta', 'Epitope', 'HLA chains']+['Score', 'Logits']]
+    df_org = predict(df, head, custom=True, batch_size=batch_size, windows=windows)[['MHC_alpha', 'MHC_beta', 'Epitope', 'HLA chains']+['Score', 'Logits']]
     cols = ['Score', 'Logits']
     df_org[cols] = df_org[cols].apply(pd.to_numeric, errors='coerce')
     df_out = df_org.copy()
@@ -133,6 +135,43 @@ if not st.session_state['input_df'].empty:
 else:
     st.info("No data available.")
 
+@st.cache_data(show_spinner=False, max_entries=2048)
+def chain_report(chain):
+    """The locator's verdict on one chain (cached: every change of a widget reruns the page)."""
+    report = get_engine().chain_report(chain)
+    report.pop("hit")
+    return report
+
+
+MAX_LISTED_CHAINS = 50  # more distinct chains outside the catalogue than this are located when the prediction runs, without a table to edit
+windows = {}
+if not st.session_state['input_df'].empty:
+    frame = st.session_state['input_df']
+    chains = [c for c in dict.fromkeys(c.strip().upper() for col in ('MHC_alpha', 'MHC_beta') for c in frame[col]) if c not in get_engine().chain_names]
+    if chains and len(chains) <= MAX_LISTED_CHAINS:
+        st.markdown("#### Domains of chains outside the catalogue")
+        st.caption("The model reads the domain of an HLA chain (58-82 residues). It is located by alignment to the allele catalogue; Start and End (residue numbers, from 1) can be corrected. "
+                   "Where no domain is found, enter Start and End, or the full chain is used and the result is not validated.")
+        reports = [chain_report(chain) for chain in chains]
+        table = pd.DataFrame({
+            "Chain": [f"{chain[:10]}... ({len(chain)} aa)" for chain in chains],
+            "Nearest allele": [r['nearest'] or '-' for r in reports],
+            "Identity": [round(r['identity'], 2) for r in reports],
+            "Status": [{'located': 'located', 'low confidence': 'located, low confidence', 'no domain': 'no domain found'}[r['tier']] for r in reports],
+            "Start": [None if r['start'] is None else r['start'] + 1 for r in reports],
+            "End": [r['end'] for r in reports],
+        })
+        edited = st.data_editor(
+            table, hide_index=True, width="stretch", key=f"windows_{hash(tuple(chains))}", disabled=["Chain", "Nearest allele", "Identity", "Status"],
+            column_config={"Start": st.column_config.NumberColumn(min_value=1, step=1), "End": st.column_config.NumberColumn(min_value=1, step=1)},
+        )
+        for chain, report, (_, row) in zip(chains, reports, edited.iterrows()):
+            start, end = row["Start"], row["End"]
+            if pd.notna(start) and pd.notna(end) and (int(start) - 1, int(end)) != (report['start'], report['end']):
+                windows[chain] = (int(start) - 1, int(end))
+    elif chains:
+        st.info(f"{len(chains)} distinct chains are not in the allele catalogue: their domains are located by alignment when you run the prediction.")
+
 with st.expander("Options", expanded=False):
     batch_size = 128
     selected_model = st.selectbox("Select measurement type", ['Qualitative', 'Mass Spectrometry', 'IC50 (<500nM)', 'IC50 (<1000nM)'], index=0)
@@ -151,7 +190,8 @@ if st.button("Run Prediction"):
                 df,
                 batch_size=batch_size,
                 show_top_binders=show_top_binders or 0,
-                head=selected_model
+                head=selected_model,
+                windows=windows
             )
             st.session_state['original_df'] = original_df
             st.session_state['result_df'] = result_df
@@ -162,11 +202,17 @@ if st.session_state.get('prediction_done', False):
     original_df = st.session_state['original_df']
     result_df = st.session_state['result_df']
     st.markdown("# Results")
-    n_full = int((original_df['HLA chains'] == 'full chain').sum())
-    if len(original_df) - n_full:
-        st.info(f"{len(original_df) - n_full} of {len(original_df)} rows: both HLA chains are in the allele catalogue and were scored exactly as Standard Mode scores these alleles (column 'HLA chains': catalogue).")
-    if n_full:
-        st.warning(f"{n_full} of {len(original_df)} rows contain an HLA chain that is not in the allele catalogue. They were run on the full chain, which is not what the model was trained on (a domain of 58-82 residues), and are not validated (column 'HLA chains': full chain).")
+    counts, n_rows = original_df['HLA chains'].value_counts(), len(original_df)
+    notes = {
+        'catalogue': (st.info, "both HLA chains are in the allele catalogue and were scored exactly as Standard Mode scores these alleles"),
+        'located': (st.info, "the domain of a chain outside the catalogue was located by alignment (identity 0.5 or more) and cut out of its embedding, as the model was trained"),
+        'manual window': (st.info, "the domain window of a chain was the one you gave"),
+        'low confidence': (st.warning, "the domain of a chain was located with an identity of only 0.4 to 0.5 to the nearest catalogue chain: check its window"),
+        'full chain': (st.warning, "a chain has no domain found and no window was given: it was run on the full chain, which is not what the model was trained on (a domain of 58-82 residues), and is not validated"),
+    }
+    for label, (show, text) in notes.items():
+        if counts.get(label, 0):
+            show(f"{counts[label]} of {n_rows} rows: {text} (column 'HLA chains': {label}).")
     if show_top_binders is None or len(original_df) <= show_top_binders:
         pass
     else:

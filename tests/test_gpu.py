@@ -1,12 +1,11 @@
 """The real engine of this tree on the GPU (marked `gpu`; skipped without a CUDA GPU, the checkpoints in models/ or matching TensorRT plans). A few minutes of GPU time at most."""
 from pathlib import Path
 
+import engine
 import numpy as np
 import pandas as pd
 import pytest
 import torch
-
-import engine
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.gpu
@@ -62,15 +61,56 @@ def test_custom_mode_equals_standard_mode_for_chains_of_the_catalogue(real, rows
     assert (custom.Logits.to_numpy() == standard.Logits.to_numpy()).all()
 
 
-def test_a_chain_outside_the_catalogue_keeps_the_full_chain_run_and_is_labelled(real, rows):
-    frame = sequences(rows.iloc[:20]).reset_index(drop=True)
-    alpha, beta = frame.MHC[0].split("_")
-    frame.loc[0, "MHC"] = alpha[:40] + ("A" if alpha[40] != "A" else "G") + alpha[41:] + "_" + beta  # one residue changed: no longer the catalogue's chain
+def mutated(chain, position):
+    return chain[:position] + ("A" if chain[position] != "A" else "G") + chain[position + 1:]
+
+
+def test_a_chain_changed_by_one_residue_is_located_and_scored_close_to_its_allele(real, rows):
+    """Not in the catalogue any more, so its domain is located (identity close to 1), cut out of its embedding and scored through the standard path: nearly what Standard Mode gives the allele."""
+    frame = sequences(rows.iloc[:60]).reset_index(drop=True)
+    standard = real.run(rows.iloc[:60], "Qualitative")
+    for k in range(0, 60, 2):
+        alpha, beta = frame.MHC[k].split("_")
+        frame.loc[k, "MHC"] = mutated(alpha, 60) + "_" + beta
     result = real.run_custom(frame, "Qualitative")
-    assert list(result["HLA chains"]) == ["full chain"] + ["catalogue"] * 19
-    assert result.attrs["engine"] == "fast+exact"  # the catalogue rows ran on the fast path, the changed chain on the legacy exact path
+    labels = list(result["HLA chains"])
+    assert all(labels[k] == "located" for k in range(0, 60, 2)) and all(labels[k] == "catalogue" for k in range(1, 60, 2)) and result.attrs["engine"] == "fast"
+    difference = np.abs(result.Logits.to_numpy(dtype=float) - standard.Logits.to_numpy(dtype=float))
+    assert difference.mean() < 0.15 and ((result.Logits > 0) != (standard.Logits > 0)).sum() <= 2
+
+
+def test_a_domain_pasted_without_its_flanks_gets_them_completed_and_scores_close_to_its_allele(real, rows):
+    catalogue = pd.read_csv(ROOT / "data" / "mhc_mapping.csv").set_index("HLA_Name")
+    domains = []
+    for pair in rows.MHC.iloc[:40]:
+        alpha, beta = pair.split("_")
+        domains.append("_".join(catalogue.HLA_Seq[a][catalogue.start_idx[a]:catalogue.end_idx[a]] for a in (alpha, beta)))
+    result = real.run_custom(pd.DataFrame({"MHC": domains, "Epitope": rows.Epitope.iloc[:40]}), "Qualitative")
+    standard = real.run(rows.iloc[:40], "Qualitative")
+    assert (result["HLA chains"] == "located").all()
+    assert np.abs(result.Logits.to_numpy(dtype=float) - standard.Logits.to_numpy(dtype=float)).mean() < 0.5  # embedded alone the domain would be far off (36.7 % of the signs flip in the prototype)
+
+
+def test_random_sequences_have_no_domain_and_keep_the_labelled_full_chain_run(real, rows):
+    rng = np.random.default_rng(0)
+    amino = np.array(list("ACDEFGHIKLMNPQRSTVWY"))
+    frame = sequences(rows.iloc[:20]).reset_index(drop=True)
+    frame.loc[0, "MHC"] = "".join(amino[rng.integers(0, 20, 250)]) + "_" + "".join(amino[rng.integers(0, 20, 250)])
+    result = real.run_custom(frame, "Qualitative")
+    assert list(result["HLA chains"]) == ["full chain"] + ["catalogue"] * 19 and result.attrs["engine"] == "fast+exact"
     legacy = real._run(frame.iloc[:1], real.custom_models["Qualitative"], real._custom_batch, 128, None)
-    assert result.Logits.iloc[0] == legacy.Logits.iloc[0]
+    assert result.Logits.iloc[0] == legacy.Logits.iloc[0]  # the legacy run, bit for bit
+
+
+def test_a_window_given_by_the_user_is_used_for_a_chain_with_no_domain_found(real, rows):
+    catalogue = pd.read_csv(ROOT / "data" / "mhc_mapping.csv").set_index("HLA_Name")
+    alpha, beta = rows.MHC.iloc[0].split("_")
+    a, b = catalogue.HLA_Seq[alpha], catalogue.HLA_Seq[beta]
+    frame = pd.DataFrame({"MHC": [mutated(a, 60) + "_" + b], "Epitope": [rows.Epitope.iloc[0]]})
+    start, end = int(catalogue.start_idx[alpha]), int(catalogue.end_idx[alpha])
+    result = real.run_custom(frame, "Qualitative", windows={mutated(a, 60): (start, end)})
+    assert list(result["HLA chains"]) == ["manual window"]
+    assert abs(float(result.Logits.iloc[0]) - float(real.run(rows.iloc[:1], "Qualitative").Logits.iloc[0])) < 0.3
 
 
 def test_a_scan_through_the_engine_scores_every_window_against_every_allele(real):

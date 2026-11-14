@@ -1,10 +1,9 @@
 """The protein scan's plain-Python part: reading a protein or FASTA, the windows, the allele panels, the hard limits. No GPU is needed."""
 from pathlib import Path
 
+import engine
 import pandas as pd
 import pytest
-
-import engine
 import scan
 
 ROOT = Path(__file__).resolve().parents[1]

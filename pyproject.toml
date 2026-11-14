@@ -12,6 +12,7 @@ dependencies = [
     "scipy",
     "streamlit",
     "esm",
+    "biopython",
 ]
 
 [project.optional-dependencies]

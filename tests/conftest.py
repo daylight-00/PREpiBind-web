@@ -21,6 +21,7 @@ def bare_engine():
     bare = engine.Engine.__new__(engine.Engine)
     bare.mode, bare.plans, bare.plans_note = "auto", object(), ""
     bare.models, bare.custom_models = {"Qualitative": object()}, {"Qualitative": object()}
+    bare.hla = object()  # a stand-in for the HLA store: run() passes it to the two paths unless the caller gives its own
     return bare
 
 

@@ -1,8 +1,7 @@
 """How Engine.run chooses between the fast and the exact path and what it does when the fast path fails. The two paths are replaced by the test; no GPU is needed."""
+import engine
 import pytest
 import torch
-
-import engine
 import trt_engines
 
 
