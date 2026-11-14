@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from sklearn.metrics import roc_auc_score, roc_curve, f1_score, balanced_accuracy_score, precision_score, precision_recall_curve, auc, matthews_corrcoef
 
 from app import predict
-from app import engine_caption
 from app import write_st_end
 
 st.set_page_config(
@@ -138,7 +137,6 @@ if st.button("Run Prediction"):
         original_df = predict(df_csv, selected_model)
     st.success("Prediction complete!")
     st.markdown("# Results")
-    engine_caption()
     st.dataframe(original_df, width="stretch")
     st.markdown("## Benchmark")
     plot_plot(original_df)
