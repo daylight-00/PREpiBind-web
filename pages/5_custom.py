@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from app import predict
 from app import write_st_end
+from engine import MAX_CHAIN_LENGTH, MAX_EPITOPE_LENGTH
 from plots import kde_figure
 
 
@@ -41,7 +42,7 @@ st.markdown(
     f"""
     This mode allows you to **directly input custom HLA α and β chain sequences** instead of selecting from predefined alleles.
     
-    - Enter MHC alpha and beta sequences (full amino acid sequences) along with epitope sequences.
+    - Enter MHC alpha and beta sequences (full amino acid sequences, up to 300 residues each) along with epitope sequences (up to 20 residues).
     - You can manually add entries or upload a CSV file with `MHC_alpha`, `MHC_beta`, and `Epitope` columns.
     - All sequences must contain only valid amino acids (A-Z standard amino acid codes).
     """
@@ -50,6 +51,8 @@ st.markdown(
 def find_error_df(df, hard_check=True):
     invalid_chars = df[~df['Epitope'].apply(lambda x: all(aa in "ACDEFGHIKLMNPQRSTVWYX" for aa in x.upper()))]
     invalid_length = df[~df['Epitope'].apply(lambda x: len(x) == 15)]
+    too_long = df[df['Epitope'].apply(lambda x: len(x) > MAX_EPITOPE_LENGTH)]
+    long_chain = df[(df['MHC_alpha'].apply(len) > MAX_CHAIN_LENGTH) | (df['MHC_beta'].apply(len) > MAX_CHAIN_LENGTH)]
     invalid_alpha = df[~df['MHC_alpha'].apply(lambda x: all(aa in "ACDEFGHIKLMNPQRSTVWYX" for aa in x.upper()))]
     invalid_beta = df[~df['MHC_beta'].apply(lambda x: all(aa in "ACDEFGHIKLMNPQRSTVWYX" for aa in x.upper()))]
     has_error = False
@@ -57,8 +60,16 @@ def find_error_df(df, hard_check=True):
         st.error("Invalid characters found in Epitope column.")
         st.dataframe(invalid_chars[['MHC_alpha', 'MHC_beta', 'Epitope']])
         has_error = True
+    if not too_long.empty:
+        st.error(f"Epitopes longer than {MAX_EPITOPE_LENGTH} residues are not supported ({len(too_long)} row(s); the longest has {too_long['Epitope'].str.len().max()}).")
+        st.dataframe(too_long[['MHC_alpha', 'MHC_beta', 'Epitope']])
+        has_error = True
+    if not long_chain.empty:
+        st.error(f"HLA chains longer than {MAX_CHAIN_LENGTH} residues are not supported ({len(long_chain)} row(s)); the longest chain of the allele catalogue has 285.")
+        st.dataframe(long_chain[['MHC_alpha', 'MHC_beta', 'Epitope']])
+        has_error = True
     if not invalid_length.empty and hard_check:
-        st.warning("Peptides of 15 residues are preferred, although other lengths are accepted.")
+        st.warning(f"Peptides of 15 residues are preferred; other lengths up to {MAX_EPITOPE_LENGTH} are accepted, with lower accuracy.")
     if not invalid_alpha.empty or not invalid_beta.empty:
         st.error("Invalid characters found in MHC allele columns.")
         invalid_allele = pd.concat([invalid_alpha, invalid_beta], ignore_index=True)
@@ -85,15 +96,15 @@ if csv_file:
 if not uploaded:
     with st.form("manual_input"):
         cols = st.columns(3)
-        mhc_alpha = cols[0].text_input("MHC α sequence")
-        mhc_beta = cols[1].text_input("MHC β sequence")
-        epitope = cols[2].text_input("Epitope", max_chars=25)
+        mhc_alpha = cols[0].text_input("MHC α sequence", max_chars=MAX_CHAIN_LENGTH)
+        mhc_beta = cols[1].text_input("MHC β sequence", max_chars=MAX_CHAIN_LENGTH)
+        epitope = cols[2].text_input("Epitope", max_chars=MAX_EPITOPE_LENGTH)
         submitted = st.form_submit_button("Add Entry")
         if epitope and not all(aa in "ACDEFGHIKLMNPQRSTVWY" for aa in epitope.upper()):
             st.error("Epitope must contain only valid amino acids.")
         elif submitted and mhc_alpha and mhc_beta and epitope:
             if len(epitope) != 15:
-                st.warning("Peptides of 15 residues are preferred, although other lengths are accepted.")
+                st.warning(f"Peptides of 15 residues are preferred; other lengths up to {MAX_EPITOPE_LENGTH} are accepted, with lower accuracy.")
 
             new_entry = pd.DataFrame({"MHC_alpha": [mhc_alpha], "MHC_beta": [mhc_beta], "Epitope": [epitope.upper()]})
             st.session_state['input_df'] = pd.concat([st.session_state['input_df'], new_entry], ignore_index=True)

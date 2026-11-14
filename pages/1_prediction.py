@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from app import predict
 from app import write_st_end
+from engine import MAX_EPITOPE_LENGTH
 from plots import kde_figure
 
 
@@ -51,6 +52,7 @@ MHC_beta_list = st.session_state['beta_list']
 def find_error_df(df, hard_check=True):
     invalid_chars = df[~df['Epitope'].apply(lambda x: all(aa in "ACDEFGHIKLMNPQRSTVWYX" for aa in x.upper()))]
     invalid_length = df[~df['Epitope'].apply(lambda x: len(x) == 15)]
+    too_long = df[df['Epitope'].apply(lambda x: len(x) > MAX_EPITOPE_LENGTH)]
     invalid_alpha = df[~df['MHC_alpha'].isin(MHC_alpha_list)]
     invalid_beta = df[~df['MHC_beta'].isin(MHC_beta_list)]
     has_error = False
@@ -58,8 +60,12 @@ def find_error_df(df, hard_check=True):
         st.error("Invalid characters found in Epitope column.")
         st.dataframe(invalid_chars[['MHC_alpha', 'MHC_beta', 'Epitope']])
         has_error = True
+    if not too_long.empty:
+        st.error(f"Epitopes longer than {MAX_EPITOPE_LENGTH} residues are not supported ({len(too_long)} row(s); the longest has {too_long['Epitope'].str.len().max()}).")
+        st.dataframe(too_long[['MHC_alpha', 'MHC_beta', 'Epitope']])
+        has_error = True
     if not invalid_length.empty and hard_check:
-        st.warning("Peptides of 15 residues are preferred, although other lengths are accepted.")
+        st.warning(f"Peptides of 15 residues are preferred; other lengths up to {MAX_EPITOPE_LENGTH} are accepted, with lower accuracy.")
     if not invalid_alpha.empty or not invalid_beta.empty:
         st.error("Invalid MHC alleles found.")
         invalid_allele = pd.concat([invalid_alpha, invalid_beta], ignore_index=True)
@@ -110,13 +116,13 @@ if not uploaded:
         cols = st.columns(3)
         mhc_alpha = cols[0].selectbox("MHC alpha", filtered_alpha, index=0 if filtered_alpha else None)
         mhc_beta = cols[1].selectbox("MHC beta", filtered_beta, index=0 if filtered_beta else None)
-        epitope = cols[2].text_input("Epitope", max_chars=25)
+        epitope = cols[2].text_input("Epitope", max_chars=MAX_EPITOPE_LENGTH)
         submitted = st.form_submit_button("Add Entry")
         if epitope and not all(aa in "ACDEFGHIKLMNPQRSTVWY" for aa in epitope.upper()):
             st.error("Epitope must contain only valid amino acids.")
         elif submitted and mhc_alpha and mhc_beta and epitope:
             if len(epitope) != 15:
-                st.warning("Peptides of 15 residues are preferred, although other lengths are accepted.")
+                st.warning(f"Peptides of 15 residues are preferred; other lengths up to {MAX_EPITOPE_LENGTH} are accepted, with lower accuracy.")
 
             new_entry = pd.DataFrame({"MHC_alpha": [mhc_alpha], "MHC_beta": [mhc_beta], "Epitope": [epitope.upper()]})
             st.session_state['input_df'] = pd.concat([st.session_state['input_df'], new_entry], ignore_index=True)

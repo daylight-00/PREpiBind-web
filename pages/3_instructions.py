@@ -15,7 +15,7 @@ st.markdown("""
 #### Manual Input
 
 **Peptide Sequences:**
-- **Length**: 9–25 amino acids; the model was trained exclusively on 15-mer peptides, and performance on other lengths is not guaranteed
+- **Length**: at most 20 amino acids (longer peptides are refused); the model was trained exclusively on 15-mer peptides, and the farther a peptide is from 15 residues the less reliable its score (see Limitations)
 - **Alphabet**: Standard 20 amino acids (ACDEFGHIKLMNPQRSTVWY) plus 'X' for ambiguous residues
 - **Validation**: Sequences are validated in real time; inputs outside the accepted alphabet are rejected
 
@@ -81,7 +81,7 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 - Recommended for routine screening with human or murine alleles
 
 **Custom HLA Mode:**
-- Accepts full-length or domain-trimmed MHC α and β chain sequences as direct input
+- Accepts full-length or domain-trimmed MHC α and β chain sequences as direct input (up to 300 residues per chain; the longest chain of the allele catalogue has 285)
 - Embeddings are computed on-the-fly; processing time is longer than Standard Mode
 - Required for alleles absent from the server database, including non-human primate (*Macaca mulatta*, Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study
 
@@ -164,6 +164,8 @@ Built-in test sets (from the original publication) are available for each model 
 | Issue | Cause | Solution |
 |-------|-------|----------|
 | "Invalid characters found" | Peptide contains non-standard amino acid codes | Use only ACDEFGHIKLMNPQRSTVWY or X |
+| "Epitopes longer than 20 residues are not supported" | A peptide is longer than the model can score meaningfully | Cut the sequence into peptides of at most 20 residues (15 is best) |
+| "HLA chains longer than 300 residues are not supported" | A chain given in Custom Mode is longer than any chain of the allele catalogue | Trim the chain (the signal peptide and the cytoplasmic tail are not needed) |
 | "Invalid MHC alleles found" | Allele not in server database | Verify nomenclature against IPD-IMGT/HLA; use Custom Mode for novel alleles |
 | CSV not loading | Missing or misspelled column headers | Headers must be exactly `MHC_alpha`, `MHC_beta`, `Epitope` |
 | KDE plot not displayed | Fewer than 2 unique score values | No action needed; results are still available |
@@ -175,7 +177,7 @@ Session state is independent per browser tab; results are not persisted across s
 
 ### Limitations
 
-- The model was trained exclusively on 15-mer peptides. Predictions for peptides of other lengths are provided but their accuracy is not validated.
+- The model was trained exclusively on 15-mer peptides. Peptides of up to 20 residues are accepted, but their accuracy is not validated and falls with the distance from 15: with random flanks added to the 15-mers of the built-in Qualitative test set the ROC AUC is 0.93 at 15 residues and 0.87 at 20 (0.80 at 25, about what a shuffled epitope gives, 0.79), and the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20. Longer peptides are refused for that reason.
 - Training comprised 151 unique HLA class II dimers (27 alpha × 89 beta allele combinations) from IEDB. The 7,282 alleles available in Standard Mode exceed the training coverage; predictions for alleles absent from the training set rely on PLM-based zero-shot generalization, and performance may degrade for alleles distant from those seen during training.
 - Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for these species.
 - Cross-species predictions (murine H2 alleles) show reduced accuracy relative to human HLA alleles in leave-one-molecule-out validation; see the original publication for quantitative results.

@@ -192,7 +192,9 @@ HLA-DRA*01:01,HLA-DRB1*15:01,GELIGILNAAKVPAD,1
 HLA-DQA1*05:01,HLA-DQB1*02:01,PKYVKQNTLKLATAA,0
 ```
 
-Column headers must match exactly. Allele names must follow WHO HLA nomenclature and be present in `data/mhc_mapping.csv`. The model was trained on 15-mer peptides; predictions for other lengths are accepted but not validated.
+Column headers must match exactly. Allele names must follow WHO HLA nomenclature and be present in `data/mhc_mapping.csv`. The model was trained on 15-mer peptides; other lengths up to 20 residues are accepted but not validated.
+
+**Limits (hard, in `code/engine.py`):** an epitope of more than `MAX_EPITOPE_LENGTH` = 20 residues and, in Custom Mode, an HLA chain of more than `MAX_CHAIN_LENGTH` = 300 residues are refused by the pages with a message and by `Engine.run` / `Engine.run_custom` with a `RequestRefused` (a `ValueError`). Why 20: every built-in data set is 15-mers only, so the range cannot be read from the data; it was measured by keeping each test 15-mer as the core and adding random flanks (`261115_img1_web_caps_scan_custom/length_auc*.json`): the Qualitative AUC is 0.93 at 15 residues, 0.87 at 20 and 0.80 at 25 (a shuffled epitope gives 0.79), the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20 and 49 % at 25, and each of the three heads measured (Qualitative, Mass Spectrometry, IC50 <500nM) steps down between 20 and 21 residues (AUC -0.036, -0.020 and -0.031). The chain limit is the allele catalogue's longest chain (285) rounded up. A test or a benchmark that needs longer input sets the two constants itself.
 
 ---
 

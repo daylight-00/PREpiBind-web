@@ -6,6 +6,7 @@ from sklearn.metrics import roc_auc_score, roc_curve, f1_score, balanced_accurac
 
 from app import predict
 from app import write_st_end
+from engine import MAX_EPITOPE_LENGTH
 
 st.set_page_config(
     page_title="Evaluation | PREpiBind",
@@ -27,6 +28,11 @@ csv_file_eval = st.file_uploader("Upload CSV", type="csv", key="csv_upload")
 if csv_file_eval is not None:
     df_csv = pd.read_csv(csv_file_eval)
     if all(col in df_csv.columns for col in ["MHC_alpha", "MHC_beta", "Epitope", "Target"]):
+        too_long = df_csv[df_csv["Epitope"].astype(str).str.len() > MAX_EPITOPE_LENGTH]
+        if not too_long.empty:
+            st.error(f"Epitopes longer than {MAX_EPITOPE_LENGTH} residues are not supported ({len(too_long)} row(s); the longest has {too_long['Epitope'].astype(str).str.len().max()}).")
+            st.dataframe(too_long[["MHC_alpha", "MHC_beta", "Epitope"]], width="stretch")
+            st.stop()
         total_rows = len(df_csv)
         records = df_csv[["MHC_alpha", "MHC_beta", "Epitope", "Target"]]
         st.success(f"CSV file loaded. Total samples: {total_rows}")

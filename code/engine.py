@@ -38,6 +38,8 @@ HEAD_CHECKPOINTS = {
 HEAD_ARGS = {"hla_dim": 960, "epi_dim": 960, "head_div": 64}
 EMBEDDING_BUDGET = 1 << 30  # bytes of epitope embeddings the fast path holds at once (about 37,000 distinct 15-mers, 17,000 distinct 32-mers)
 MAX_PAIRS = 2048  # distinct HLA pairs the fast path encodes at once (the pair encodings take 0.6 GB); a request with more runs on the exact path
+MAX_EPITOPE_LENGTH = 20  # residues, refused above (261115_img1_web_caps_scan_custom): the heads were trained on 15-mers only and with random flanks the AUC falls from 0.93 at 15 to 0.87 at 20 and 0.80 at 25 (a shuffled epitope: 0.79) while the share of non-binders scored above 0.5 rises from 15 % to 29 % and 49 %
+MAX_CHAIN_LENGTH = 300  # residues of an HLA chain given as a sequence (Custom Mode), refused above: the allele catalogue's longest chain has 285, 99 % have at most 266
 
 _tokenizer = EsmSequenceTokenizer()
 
@@ -74,6 +76,21 @@ class HlaStore:
 
 class FastUnavailable(Exception):
     """The fast path cannot take this request; the message says why."""
+
+
+class RequestRefused(ValueError):
+    """The request is outside the limits the service accepts (MAX_EPITOPE_LENGTH, MAX_CHAIN_LENGTH); the message says which and is meant to be shown to the user as it is."""
+
+
+def check_request(epitopes, chains=()):
+    """Refuse an epitope longer than MAX_EPITOPE_LENGTH or an HLA chain longer than MAX_CHAIN_LENGTH. The limits are read when called, so a test or a benchmark can raise them."""
+    epitopes, chains = list(epitopes), list(chains)
+    too_long = [len(e) for e in epitopes if len(e) > MAX_EPITOPE_LENGTH]
+    if too_long:
+        raise RequestRefused(f"{len(too_long)} epitope(s) are longer than the maximum of {MAX_EPITOPE_LENGTH} residues (the longest has {max(too_long)}): the model was trained on 15-mers and its scores beyond {MAX_EPITOPE_LENGTH} residues carry almost no information")
+    too_long = [len(c) for c in chains if len(c) > MAX_CHAIN_LENGTH]
+    if too_long:
+        raise RequestRefused(f"{len(too_long)} HLA chain(s) are longer than the maximum of {MAX_CHAIN_LENGTH} residues (the longest has {max(too_long)}); the longest chain of the allele catalogue has 285")
 
 
 _engines, _engines_lock = {}, threading.Lock()
@@ -126,6 +143,7 @@ class Engine:
         mode = mode or self.mode
         if mode not in ("auto", "fast", "exact"):
             raise ValueError(f"mode must be auto, fast or exact, not {mode!r}")
+        check_request(df["Epitope"].dropna())
         out_of_memory = False
         if mode != "exact":
             try:
@@ -250,6 +268,8 @@ class Engine:
 
     def run_custom(self, df, head, batch_size=128, progress=None):
         """The same for HLA chains given as sequences: MHC = '<alpha sequence>_<beta sequence>'. The chains are embedded on the fly with the same ESM C."""
+        rows = df.dropna(subset=["MHC", "Epitope"])
+        check_request(rows["Epitope"], (chain for pair in rows["MHC"].unique() for chain in pair.split("_")))
         return self._run(df, self.custom_models[head], self._custom_batch, batch_size, progress)
 
     def _run(self, df, model, make_batch, batch_size, progress):
