@@ -27,6 +27,8 @@ def predict(df, head, custom=False, batch_size=128):
     out = (engine.run_custom if custom else engine.run)(df, head, batch_size=batch_size, progress=show)
     bar.empty()
     text.empty()
+    if out.attrs.get("engine") == "fast":
+        st.caption("Computed with the fast engine (TensorRT, fp16).")
     return out
 
 def natural_key(s):

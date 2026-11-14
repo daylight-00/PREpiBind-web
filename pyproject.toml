@@ -14,6 +14,15 @@ dependencies = [
     "esm",
 ]
 
+[project.optional-dependencies]
+# The fast engine (TensorRT fp16, see README "Fast engine"): building the plans needs onnx and onnxscript, running them only tensorrt.
+# NVIDIA publishes no TensorRT wheel for Python 3.15 yet (11.1 to 11.4 stop at cp314): there the extra installs nothing and the engine serves the exact path.
+trt = [
+    "tensorrt-cu13>=11.4; python_version < '3.15'",
+    "onnx",
+    "onnxscript",
+]
+
 [tool.uv]
 # One host class: Linux x86_64 with an NVIDIA GPU. Without this uv also solves win32/arm splits that have nothing to do with the server.
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]

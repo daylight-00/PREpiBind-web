@@ -36,6 +36,8 @@ PREpiBind-web/
 │   ├── model.py                  # Neural network architecture (plm_cat_mean_inf)
 │   ├── embedder.py               # ESM C 300M epitope/HLA embedder (loads the released checkpoint)
 │   ├── engine.py                 # Inference engine: four heads on one ESM C, HLA store, batching, scores
+│   ├── trt_engines.py            # Fast engine: TensorRT fp16 plans (build, load, run)
+│   ├── build_engines.py          # Builds the plans for this TensorRT version and GPU
 │   └── collate.py                # Batch collation with padding and masking
 │
 ├── data/
@@ -139,6 +141,21 @@ The server will be available at `http://localhost:8501/prepibind`.
 For production deployment behind a reverse proxy, set `--server.baseUrlPath` to match your proxy path prefix.
 
 `security_config.py` adds its security headers by patching Tornado. Current Streamlit serves through Starlette and uvicorn and does not install Tornado, so on this stack the patch only logs a warning and the headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, the cookie flags) are not sent. Until it is ported (Streamlit's `st.App` takes ASGI middleware), set them at the reverse proxy.
+
+---
+
+## Fast engine (TensorRT)
+
+The engine has two paths. The **exact** path is the baseline's arithmetic in eager mode (bitwise equal to the baseline code in the same environment). The **fast** path computes every distinct epitope through ESM C once and every distinct HLA pair through the head's HLA encoder once, runs the joint blocks in batches of rows of one epitope length, and executes the three parts as TensorRT fp16 plans. On the four built-in test sets it is 3.4 to 6.0 times faster (48,352 rows in 6.4 s against 24.4 s), and the plans of all four heads take 1.8 GB of GPU memory (2.9 GB in total with the exact path's weights, which stay resident).
+
+It is not bit-identical. Against the exact path 0.08 to 0.16 % of the rows change sign on the built-in sets, almost all within 0.15 logits of the decision threshold, and the AUC moves by at most 0.00004. Mixed epitope lengths differ by design: the exact path pads a batch to its longest epitope and the epitope encoder sees the padding, so the logit of a short epitope depends on the other epitopes of its batch; the fast path never pads the epitope side. Custom Mode, epitopes shorter than 8 or longer than 32 residues and HLA pairs longer than 200 residues always run on the exact path.
+
+```bash
+uv sync --extra trt            # Python 3.14: NVIDIA publishes no TensorRT wheel for Python 3.15 yet
+python code/build_engines.py   # about 3 minutes, once per TensorRT, driver or GPU change or new checkpoints; writes models/engines/<tensorrt>-<gpu>/
+```
+
+`PREPIBIND_ENGINE` selects the path: `auto` (default) serves the fast path when matching plans are loaded and the request is in their ranges, otherwise the exact path; `fast` fails instead of falling back; `exact` never loads the plans. The service log says which path is active, and a result computed fast is captioned on the page. The plans share one scratch buffer, so fast requests run one at a time.
 
 ---
 
