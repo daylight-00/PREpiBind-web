@@ -23,6 +23,13 @@ trt = [
     "onnxscript",
 ]
 
+[dependency-groups]
+# Not installed by a plain `uv sync` (only the dev group is), so the service's environment stays as it was: run the tests with `uv run --extra trt --group test pytest`.
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.uv]
 # One host class: Linux x86_64 with an NVIDIA GPU. Without this uv also solves win32/arm splits that have nothing to do with the server.
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
