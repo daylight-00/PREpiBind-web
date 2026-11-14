@@ -25,6 +25,7 @@ with col1:
 3. Choose a prediction model (Qualitative / IC50 / MS)
 4. Click **Run Prediction** and download results as CSV
 
+To search a whole protein for binding regions, use **[Scan](/prepibind/scan)**.
 For novel or non-catalogued alleles, use **[Custom Mode](/prepibind/custom)**.
 
 """)
@@ -35,6 +36,7 @@ with col2:
 - 7,282 MHC-II alleles (human HLA-DP/DQ/DR and murine H2)
 - Four prediction models: Qualitative, IC50 <500 nM, IC50 <1000 nM, MS elution
 - Standard Mode (pre-computed embeddings) and Custom HLA Mode (novel allele sequences)
+- Protein scan: every window of a protein against a panel of alleles
 - Model benchmarking against user-supplied labeled datasets
 """)
 

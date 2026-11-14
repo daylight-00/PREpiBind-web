@@ -75,6 +75,7 @@ def write_st_end():
 pg = st.navigation([
     st.Page("pages/0_home.py", title="Home"),
     st.Page("pages/1_prediction.py", title="Prediction"),
+    st.Page("pages/6_scan.py", title="Scan"),
     st.Page("pages/5_custom.py", title="Custom Mode"),
     st.Page("pages/2_evaluation.py", title="Evaluation"),
     st.Page("pages/3_instructions.py", title="Instructions"),

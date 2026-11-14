@@ -98,6 +98,18 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 
 ---
 
+### Protein Scan
+
+The **Scan** page scores every window of a protein against a panel of HLA class II alleles, to find the regions that bind.
+
+1. **Protein**: paste a sequence or FASTA text, or upload a FASTA file. Digits, spaces, gaps and a trailing stop are ignored; only amino acid codes (and X) are accepted. With several FASTA records you choose one.
+2. **Alleles**: the 27-allele reference panel (16 HLA-DR, 6 HLA-DQ, 5 HLA-DP), the 11 DRB1 alleles of that panel, or your own list, one pair per line (`HLA-DQA1*05:01, HLA-DQB1*02:01`; for HLA-DR a beta chain alone is enough, its alpha chain is HLA-DRA*01:01). Names must be in the allele catalogue.
+3. **Window lengths**: 15 residues by default, the length the model was trained on; 12 to 20 are optional and less reliable (see Limitations).
+4. **Limits**: a protein of at most 5,000 residues, at most 100 alleles and at most 500,000 predictions (windows × alleles × window lengths); that is about 30 seconds of computation. A protein of 500 residues against the 27-allele panel makes 13,122 predictions and takes about a second. If the fast engine is unavailable the limit is 100,000 predictions.
+5. **Results**: the 20 highest-scoring windows, the windows bound by the most alleles, a heat map of the score along the protein for each allele, and a CSV of every prediction (`Start`, `End`, `Peptide`, `MHC_alpha`, `MHC_beta`, `Score`, `Logits`). Scores are model outputs, not measured affinities.
+
+---
+
 ### Output Format
 
 #### Columns
@@ -109,6 +121,7 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 | `Epitope` | Input peptide sequence |
 | `Score` | Sigmoid-transformed binding probability (0–1) |
 | `Logits` | Pre-sigmoid model output (linear scale) |
+| `HLA chains` | Custom Mode only: `catalogue` (both chains are in the allele catalogue and were scored as Standard Mode scores them) or `full chain` (not validated, see Prediction Modes) |
 
 Results are sorted by descending `Score`. A score ≥ 0.5 is the default positive binding threshold, consistent with a sigmoid output; users should calibrate thresholds for their specific experimental context.
 
@@ -178,7 +191,7 @@ Session state is independent per browser tab; results are not persisted across s
 
 ### Limitations
 
-- The model was trained exclusively on 15-mer peptides. Peptides of up to 20 residues are accepted, but their accuracy is not validated and falls with the distance from 15: with random flanks added to the 15-mers of the built-in Qualitative test set the ROC AUC is 0.93 at 15 residues and 0.87 at 20 (0.80 at 25, about what a shuffled epitope gives, 0.79), and the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20. Longer peptides are refused for that reason.
+- The model was trained exclusively on 15-mer peptides. Peptides of up to 20 residues are accepted, but their accuracy is not validated and falls with the distance from 15: with random flanks added to the 15-mers of the built-in Qualitative test set the ROC AUC is 0.93 at 15 residues and 0.87 at 20 (0.80 at 25, about what a shuffled epitope gives, 0.79), and the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20. Longer peptides are refused for that reason; to score a longer sequence, use the Scan page, which scores windows of at most 20 residues.
 - Training comprised 151 unique HLA class II dimers (27 alpha × 89 beta allele combinations) from IEDB. The 7,282 alleles available in Standard Mode exceed the training coverage; predictions for alleles absent from the training set rely on PLM-based zero-shot generalization, and performance may degrade for alleles distant from those seen during training.
 - Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for these species.
 - Cross-species predictions (murine H2 alleles) show reduced accuracy relative to human HLA alleles in leave-one-molecule-out validation; see the original publication for quantitative results.

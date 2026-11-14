@@ -21,6 +21,7 @@ PREpiBind-web/
 ├── app.py                        # Entry point: model loading, session state, navigation
 ├── security_config.py            # HTTP security headers via Tornado monkey-patching
 ├── pyproject.toml, uv.lock       # Environment (uv)
+├── tests/                        # pytest: a GPU-free tier and a tier marked gpu (see Tests)
 ├── robots.txt
 ├── .streamlit/config.toml        # Streamlit server settings
 │
@@ -30,12 +31,14 @@ PREpiBind-web/
 │   ├── 2_evaluation.py           # Model benchmarking with labeled data
 │   ├── 3_instructions.py         # Full user guide
 │   ├── 4_about.py                # Authors, citation, licensing
-│   └── 5_custom.py               # Custom HLA sequence mode
+│   ├── 5_custom.py               # Custom HLA sequence mode
+│   └── 6_scan.py                 # Protein scan: every window of a protein against a panel of alleles
 │
 ├── code/
 │   ├── model.py                  # Neural network architecture (plm_cat_mean_inf)
 │   ├── embedder.py               # ESM C 300M epitope/HLA embedder (loads the released checkpoint)
 │   ├── engine.py                 # Inference engine: four heads on one ESM C, HLA store, batching, scores
+│   ├── scan.py                   # Protein scan: FASTA, windows, allele panels, limits (plain Python)
 │   ├── trt_engines.py            # Fast engine: TensorRT fp16 plans (build, load, run)
 │   ├── build_engines.py          # Builds the plans for this TensorRT version and GPU
 │   └── collate.py                # Batch collation with padding and masking
@@ -206,6 +209,8 @@ HLA-DQA1*05:01,HLA-DQB1*02:01,PKYVKQNTLKLATAA,0
 Column headers must match exactly. Allele names must follow WHO HLA nomenclature and be present in `data/mhc_mapping.csv`. The model was trained on 15-mer peptides; other lengths up to 20 residues are accepted but not validated.
 
 **Limits (hard, in `code/engine.py`):** an epitope of more than `MAX_EPITOPE_LENGTH` = 20 residues and, in Custom Mode, an HLA chain of more than `MAX_CHAIN_LENGTH` = 300 residues are refused by the pages with a message and by `Engine.run` / `Engine.run_custom` with a `RequestRefused` (a `ValueError`). Why 20: every built-in data set is 15-mers only, so the range cannot be read from the data; it was measured by keeping each test 15-mer as the core and adding random flanks (`261115_img1_web_caps_scan_custom/length_auc*.json`): the Qualitative AUC is 0.93 at 15 residues, 0.87 at 20 and 0.80 at 25 (a shuffled epitope gives 0.79), the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20 and 49 % at 25, and each of the three heads measured (Qualitative, Mass Spectrometry, IC50 <500nM) steps down between 20 and 21 residues (AUC -0.036, -0.020 and -0.031). The chain limit is the allele catalogue's longest chain (285) rounded up. A test or a benchmark that needs longer input sets the two constants itself.
+
+**Protein scan limits (`code/scan.py`):** at most 5,000 residues, 100 alleles and 500,000 predictions (windows x alleles x window lengths) per scan, 100,000 predictions while the fast engine is unavailable. They come from the measured throughput (`261115_img1_web_caps_scan_custom/scan_throughput.json`): the fast path scores 16,000 to 17,000 predictions per second from 13,000 to 1,200,000 predictions, with the GPU memory staying under 350 MiB over the engine's own; the exact path about 2,000 per second. 500,000 predictions are about 30 s, which is 5,000 residues against 100 alleles.
 
 ---
 

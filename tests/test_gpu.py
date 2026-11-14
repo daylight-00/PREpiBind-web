@@ -73,6 +73,21 @@ def test_a_chain_outside_the_catalogue_keeps_the_full_chain_run_and_is_labelled(
     assert result.Logits.iloc[0] == legacy.Logits.iloc[0]
 
 
+def test_a_scan_through_the_engine_scores_every_window_against_every_allele(real):
+    import scan
+
+    names = set(pd.read_csv(ROOT / "data" / "mhc_mapping.csv").HLA_Name)
+    protein = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV"
+    pairs = scan.reference_panel(names)
+    frame = scan.scan_frame(protein, [15], pairs)
+    result = real.run(frame, "Qualitative")
+    assert len(result) == (len(protein) - 14) * 27 and np.isfinite(result.Logits.to_numpy(dtype=float)).all() and result.attrs["engine"] == "fast"
+    window = scan.scan_frame(protein[9:24], [15], pairs)  # the window that starts at residue 10, scored on its own against the same alleles
+    alone = real.run(window, "Qualitative")
+    inside = result[result.Start == 10].Logits.to_numpy(dtype=float)
+    assert np.abs(inside - alone.Logits.to_numpy(dtype=float)).max() < 0.2  # the fast path is not bitwise across request sizes
+
+
 def test_a_refused_request_leaves_the_engine_usable(real, rows):
     long = rows.copy()
     long.loc[long.index[0], "Epitope"] = "A" * (engine.MAX_EPITOPE_LENGTH + 1)
