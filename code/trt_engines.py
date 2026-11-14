@@ -35,30 +35,57 @@ def slug(text):
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
 
 
+GRAPH_VERSION = 1  # bump when the exported graphs (the wrappers below) change: plans of another version are neither loaded nor overwritten
+RANGES = {"tokens": list(TOKENS), "hla_length": list(HLA_LEN), "epitope_length": list(EPI_LEN)}
+
+
 def plan_dir(root):
-    major, minor = torch.cuda.get_device_capability(0)
-    return Path(root) / "models" / "engines" / f"trt{trt.__version__}-{slug(torch.cuda.get_device_name(0))}-sm{major}{minor}"
+    """Plans live per TensorRT version, GPU model and graph version, so that building for a newer graph or TensorRT never overwrites what an older release loads."""
+    index = torch.cuda.current_device()
+    major, minor = torch.cuda.get_device_capability(index)
+    return Path(root) / "models" / "engines" / f"trt{trt.__version__}-{slug(torch.cuda.get_device_name(index))}-sm{major}{minor}-g{GRAPH_VERSION}"
 
 
-def _stamp(files):
-    return {Path(f).name: {"size": Path(f).stat().st_size, "mtime_ns": Path(f).stat().st_mtime_ns} for f in files}
+def _stamp(roles):
+    """What each plan was built from, by role ({'esm': path, '<head>': path}): a swapped checkpoint or head mapping is noticed, not only a changed file."""
+    return {role: {"file": Path(f).name, "size": Path(f).stat().st_size, "mtime_ns": Path(f).stat().st_mtime_ns} for role, f in roles.items()}
+
+
+def _mismatch(manifest, roles):
+    """Why a manifest does not fit this code and these checkpoints, or None."""
+    if manifest.get("graph_version") != GRAPH_VERSION:
+        return "were built from other graphs"
+    if manifest.get("max_batch") != MAX_BATCH or manifest.get("ranges") != RANGES:
+        return "were built for other shape ranges"
+    if manifest.get("checkpoints") != _stamp(roles):
+        return "were built from other checkpoints"
+    return None
 
 
 def load(root, files, heads):
-    """(Plans, None) when plans for this TensorRT and GPU exist and were built from `files`; else (None, the reason)."""
+    """(Plans, None) when plans for this TensorRT, GPU and graph version exist and were built from `files` (the ESM C checkpoint, then one per head in the order of `heads`); else (None, the reason)."""
     if trt is None:
         return None, "TensorRT is not installed (extra 'trt'; NVIDIA publishes no TensorRT wheel for Python 3.15 yet)"
     if not torch.cuda.is_available():
         return None, "no GPU"
     directory = plan_dir(root)
-    if not (directory / "manifest.json").exists():
-        return None, f"no plans for this TensorRT and GPU: run `python code/build_engines.py` (expected in {directory})"
-    if json.loads((directory / "manifest.json").read_text()).get("checkpoints") != _stamp(files):
-        return None, f"the plans in {directory} were built from other checkpoints: rebuild them with `python code/build_engines.py`"
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text())
+    except FileNotFoundError:
+        return None, f"no plans for this TensorRT, GPU and graph version: run `python code/build_engines.py` (expected in {directory})"
+    except (OSError, ValueError) as error:
+        return None, f"the manifest of the plans in {directory} cannot be read ({error}): rebuild them with `python code/build_engines.py`"
+    why = _mismatch(manifest, dict(zip(["esm", *heads], files)))
+    if why:
+        return None, f"the plans in {directory} {why}: rebuild them with `python code/build_engines.py`"
     try:
         return Plans(directory, heads), None
-    except Exception as error:  # a plan from another driver or a damaged file: serve the exact path, say why
+    except Exception as error:  # noqa: BLE001 - a plan from another driver or a damaged file, whatever the runtime raises: serve the exact path, say why
         return None, f"the plans in {directory} cannot be loaded ({type(error).__name__}: {error}): rebuild them with `python code/build_engines.py`"
+
+
+class TrtError(RuntimeError):
+    """TensorRT refused or failed an execution (an input outside the plan's profile or of another type, a driver or runtime that no longer matches the plans, a context on another device)."""
 
 
 _DTYPE = {"HALF": torch.float16, "FLOAT": torch.float32, "INT32": torch.int32, "INT64": torch.int64, "BOOL": torch.bool}
@@ -75,16 +102,20 @@ class _Plan:
         names = [self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)]
         self.inputs = [n for n in names if self.engine.get_tensor_mode(n) == trt.TensorIOMode.INPUT]
         self.output = next(n for n in names if self.engine.get_tensor_mode(n) != trt.TensorIOMode.INPUT)
+        self.dtypes = {n: _DTYPE[self.engine.get_tensor_dtype(n).name] for n in names}
         self.scratch = self.engine.get_device_memory_size_for_profile_v2(0)
 
     def __call__(self, *tensors):
+        if len(tensors) != len(self.inputs):
+            raise TrtError(f"{len(tensors)} tensors for {len(self.inputs)} inputs")
         for name, tensor in zip(self.inputs, tensors):
-            self.context.set_input_shape(name, tuple(tensor.shape))
-            self.context.set_tensor_address(name, tensor.data_ptr())
-        out = torch.empty(tuple(self.context.get_tensor_shape(self.output)), dtype=_DTYPE[self.engine.get_tensor_dtype(self.output).name], device="cuda")
-        self.context.set_tensor_address(self.output, out.data_ptr())
-        if not self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream):
-            raise RuntimeError("TensorRT execution failed")
+            if tensor.dtype != self.dtypes[name]:
+                raise TrtError(f"input {name} is {tensor.dtype}, the plan takes {self.dtypes[name]}")
+            if not (self.context.set_input_shape(name, tuple(tensor.shape)) and self.context.set_tensor_address(name, tensor.data_ptr())):
+                raise TrtError(f"input {name} of shape {tuple(tensor.shape)} is outside the plan's profile")
+        out = torch.empty(tuple(self.context.get_tensor_shape(self.output)), dtype=self.dtypes[self.output], device="cuda")
+        if not self.context.set_tensor_address(self.output, out.data_ptr()) or not self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream):
+            raise TrtError("TensorRT execution failed")
         return out
 
 
@@ -173,7 +204,7 @@ def _compile(onnx_path, profile, plan_path):
 
 def build(embedder, heads, files, root, log=print):
     """Export the three kinds of graph from the eager modules (`embedder`: the Embedder; `heads`: {name: plm_cat_mean_inf}, fp16 on the GPU) and compile them.
-    `files` are the checkpoints the modules were loaded from; the manifest written last records them."""
+    `files` are the checkpoints the modules were loaded from (the ESM C checkpoint, then one per head in the order of `heads`); the manifest written last records them."""
     from torch.export import Dim
 
     directory = plan_dir(root)
@@ -210,8 +241,9 @@ def build(embedder, heads, files, root, log=print):
                                ({0: batch, 1: hla_len}, {0: batch, 1: epi_len}, {0: batch, 1: hla_len}, {0: batch, 1: epi_len}),
                                {"hla": ((1, lo_hla, 960), (MAX_BATCH, OPT["hla"], 960), (MAX_BATCH, hi_hla, 960)), "epitope": ((1, lo_epi, 960), (MAX_BATCH, OPT["epi"], 960), (MAX_BATCH, hi_epi, 960)),
                                 "mask_hla": ((1, lo_hla), (MAX_BATCH, OPT["hla"]), (MAX_BATCH, hi_hla)), "mask_epitope": ((1, lo_epi), (MAX_BATCH, OPT["epi"]), (MAX_BATCH, hi_epi))}, f"joint_{stem}.plan", tmp)
-    manifest = {"tensorrt": trt.__version__, "torch": torch.__version__, "gpu": torch.cuda.get_device_name(0), "compute_capability": list(torch.cuda.get_device_capability(0)),
-                "max_batch": MAX_BATCH, "ranges": {"tokens": TOKENS, "hla_length": HLA_LEN, "epitope_length": EPI_LEN}, "checkpoints": _stamp(files),
+    index = torch.cuda.current_device()
+    manifest = {"graph_version": GRAPH_VERSION, "tensorrt": trt.__version__, "torch": torch.__version__, "gpu": torch.cuda.get_device_name(index), "compute_capability": list(torch.cuda.get_device_capability(index)),
+                "max_batch": MAX_BATCH, "ranges": RANGES, "checkpoints": _stamp(dict(zip(["esm", *heads], files))),
                 "built": time.strftime("%Y-%m-%d %H:%M:%S"), "build_seconds": round(time.time() - started),
                 "plans": {p.name: p.stat().st_size for p in sorted(directory.glob("*.plan"))}}
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=1))

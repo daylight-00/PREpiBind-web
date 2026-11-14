@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from app import predict
+from app import engine_caption
 from app import write_st_end
 from plots import kde_figure
 
@@ -174,6 +175,7 @@ if st.session_state.get('prediction_done', False):
     original_df = st.session_state['original_df']
     result_df = st.session_state['result_df']
     st.markdown("# Results")
+    engine_caption()
     if show_top_binders is None or len(original_df) <= show_top_binders:
         pass
     else:

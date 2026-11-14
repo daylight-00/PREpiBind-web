@@ -27,9 +27,14 @@ def predict(df, head, custom=False, batch_size=128):
     out = (engine.run_custom if custom else engine.run)(df, head, batch_size=batch_size, progress=show)
     bar.empty()
     text.empty()
-    if out.attrs.get("engine") == "fast":
-        st.caption("Computed with the fast engine (TensorRT, fp16).")
+    st.session_state["engine_used"] = out.attrs.get("engine")
     return out
+
+
+def engine_caption():
+    """Say under a result that the fast engine computed it (the result outlives the run in the session state, so the caption is drawn where the result is)."""
+    if st.session_state.get("engine_used") == "fast":
+        st.caption("Computed with the fast engine (TensorRT, fp16).")
 
 def natural_key(s):
     return [int(text) if text.isdigit() else text for text in re.split(r'(\d+)', s)]

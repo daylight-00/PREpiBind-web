@@ -12,6 +12,7 @@ rows of one epitope length, and executes the three kinds of graph as TensorRT fp
 `PREPIBIND_ENGINE` picks: `auto` (default) = fast when plans for this TensorRT and GPU are loaded and the request is in the plans' ranges, else exact; `fast` = fast or
 an error; `exact` = never load the plans. Custom mode is always exact.
 """
+import contextlib
 import os
 import threading
 from pathlib import Path
@@ -35,6 +36,8 @@ HEAD_CHECKPOINTS = {
     "IC50 (<1000nM)": "prepi_esmc_small_ic50_1000_e5_s128_f1_fp16.pth",
 }
 HEAD_ARGS = {"hla_dim": 960, "epi_dim": 960, "head_div": 64}
+EMBEDDING_BUDGET = 1 << 30  # bytes of epitope embeddings the fast path holds at once (about 37,000 distinct 15-mers, 17,000 distinct 32-mers)
+MAX_PAIRS = 2048  # distinct HLA pairs the fast path encodes at once (the pair encodings take 0.6 GB); a request with more runs on the exact path
 
 _tokenizer = EsmSequenceTokenizer()
 
@@ -101,7 +104,8 @@ class Engine:
         self.plans, self.plans_note = None, "PREPIBIND_ENGINE=exact"
         if self.mode != "exact":
             files = [root / "models" / ESM_CHECKPOINT, *(root / "models" / file for file in HEAD_CHECKPOINTS.values())]
-            self.plans, self.plans_note = trt_engines.load(root, files, list(HEAD_CHECKPOINTS)) if self.device.type == "cuda" else (None, "no GPU")
+            with self._device_scope():
+                self.plans, self.plans_note = trt_engines.load(root, files, list(HEAD_CHECKPOINTS)) if self.device.type == "cuda" else (None, "no GPU")
             if self.plans is None and self.mode == "fast":
                 raise RuntimeError(f"PREPIBIND_ENGINE=fast, but {self.plans_note}")
         print(f"engine: mode {self.mode}, fast path {'ready' if self.plans else 'not available (' + self.plans_note + ')'}", flush=True)  # the service log says which path serves
@@ -116,8 +120,13 @@ class Engine:
         """Predict every row of `df` with the named head. Columns: MHC = '<alpha allele>_<beta allele>' (names in the HLA store) and Epitope.
         Returns a copy with Logits (float16) and Score (float64) added; rows lacking MHC or Epitope are dropped, as in the baseline.
         `progress(batches_done, batches_total)` is called after every batch. `mode` overrides the engine's (auto, fast, exact) for this call;
-        `result.attrs['engine']` says which path ran ('fast' or 'exact')."""
+        `result.attrs['engine']` says which path ran ('fast' or 'exact'). In `auto` the exact path takes over, and the log says so for the cases that are not obvious, when the plans do not
+        cover the request (epitope length, HLA pair length, more than MAX_PAIRS distinct pairs), when the GPU runs out of memory, when TensorRT produces a non-finite logit,
+        and (for the rest of the process) when TensorRT fails while running."""
         mode = mode or self.mode
+        if mode not in ("auto", "fast", "exact"):
+            raise ValueError(f"mode must be auto, fast or exact, not {mode!r}")
+        out_of_memory = False
         if mode != "exact":
             try:
                 if self.plans is None:
@@ -126,11 +135,29 @@ class Engine:
             except FastUnavailable:
                 if mode == "fast":
                     raise
+            except torch.cuda.OutOfMemoryError:
+                if mode == "fast":
+                    raise
+                out_of_memory = True
+            except trt_engines.TrtError as error:
+                if mode == "fast":
+                    raise
+                self.plans, self.plans_note = None, f"TensorRT failed while running ({error}); serving the exact path until the service restarts"
+                print(f"engine: {self.plans_note}", flush=True)
+        if out_of_memory:
+            torch.cuda.empty_cache()  # the tensors of the failed request are released now that its exception is gone
+            print("engine: the fast path ran out of GPU memory; this request runs on the exact path", flush=True)
         return self._run(df, self.models[head], self._standard_batch, batch_size, progress)
+
+    def _device_scope(self):
+        """The engine's GPU as the current CUDA device: TensorRT contexts, the scratch buffer and the outputs are created on the current device."""
+        return torch.cuda.device(self.device) if self.device.type == "cuda" else contextlib.nullcontext()
 
     def _run_fast(self, df, head, batch_size, progress):
         """Distinct epitopes through ESM C, distinct HLA pairs through the head's HLA encoder, then the joint blocks, in batches of rows of one epitope length (no padding
-        of the epitope side); the logits go back to the rows' order. Raises FastUnavailable for what the plans do not cover."""
+        of the epitope side); the logits go back to the rows' order. The memory of a request is bounded whatever its size: the epitope embeddings are held in blocks of at most
+        EMBEDDING_BUDGET bytes (rows are ordered by their epitope), at most MAX_PAIRS distinct pairs are encoded at once and their embeddings are built chunk by chunk.
+        Raises FastUnavailable for what the plans do not cover."""
         out = df.dropna(subset=["MHC", "Epitope"]).copy()
         mhc, epitope = out["MHC"].tolist(), out["Epitope"].tolist()
         if not mhc:
@@ -138,39 +165,41 @@ class Engine:
         low, high = trt_engines.EPI_LEN
         if not low <= min(map(len, epitope)) <= max(map(len, epitope)) <= high:
             raise FastUnavailable(f"epitope lengths {min(map(len, epitope))}-{max(map(len, epitope))} are outside the fast engine's {low}-{high}")
-        distinct = {}  # length -> the distinct epitopes of that length; an epitope's position in its list is its row in the embedding buffer
+        pairs = list(dict.fromkeys(mhc))
+        if len(pairs) > MAX_PAIRS:
+            raise FastUnavailable(f"{len(pairs)} distinct HLA pairs are more than the fast engine takes at once ({MAX_PAIRS})")
+        chains = [pair.split("_") for pair in pairs]
+        pair_width = max(max(len(self.hla.chain(a)) + len(self.hla.chain(b)) for a, b in chains), trt_engines.HLA_LEN[0])
+        if pair_width > trt_engines.HLA_LEN[1]:
+            raise FastUnavailable(f"an HLA pair of {pair_width} residues is longer than the fast engine's {trt_engines.HLA_LEN[1]}")
+        distinct = {}  # length -> the distinct epitopes of that length; an epitope's position in its list decides its block and its row in the block
         for e in dict.fromkeys(epitope):
             distinct.setdefault(len(e), []).append(e)
         position = {e: i for es in distinct.values() for i, e in enumerate(es)}
         tokens = {e: torch.as_tensor(tokenize(e), dtype=torch.long) for es in distinct.values() for e in es}
         if any(len(t) != len(e) + 2 for e, t in tokens.items()):
             raise FastUnavailable("an epitope contains characters the tokenizer does not take one by one")
-        pairs = list(dict.fromkeys(mhc))
-        pair_embeddings = [torch.cat([self.hla.chain(a), self.hla.chain(b)]) for a, b in (pair.split("_") for pair in pairs)]
-        pair_width = max(max(map(len, pair_embeddings)), trt_engines.HLA_LEN[0])
-        if pair_width > trt_engines.HLA_LEN[1]:
-            raise FastUnavailable(f"an HLA pair of {pair_width} residues is longer than the fast engine's {trt_engines.HLA_LEN[1]}")
         step, dev, plans = min(batch_size, trt_engines.MAX_BATCH), self.device, self.plans
         rows = {}  # epitope length -> the rows (in the request's order) with that length
         for i, e in enumerate(epitope):
             rows.setdefault(len(e), []).append(i)
-        total = sum(-(-len(es) // step) for es in distinct.values()) + -(-len(pairs) // step) + sum(-(-len(r) // step) for r in rows.values())
+        plan = {}  # length -> (rows ordered by the position of their epitope, those positions, epitopes per block, the first row of every block)
+        total = -(-len(pairs) // step)
+        for length, es in distinct.items():
+            members = np.asarray(rows[length], dtype=np.int64)
+            positions = np.fromiter((position[epitope[i]] for i in members), dtype=np.int64, count=len(members))
+            order = np.argsort(positions, kind="stable")
+            members, positions = members[order], positions[order]
+            size = max(1, EMBEDDING_BUDGET // (length * 960 * 2 * step)) * step  # a multiple of the batch, so the blocks cut the epitopes at batch borders
+            edges = np.searchsorted(positions, np.arange(0, len(es) + size, size))
+            plan[length] = (members, positions, size, edges)
+            total += -(-len(es) // step) + sum(-(-int(edges[b + 1] - edges[b]) // step) for b in range(len(edges) - 1))
         done = 0
-        with self._fast_lock, torch.inference_mode():
-            embeddings = {}
-            for length, es in distinct.items():
-                buffer = torch.empty(len(es), length, 960, dtype=torch.float16, device=dev)
-                for i in range(0, len(es), step):
-                    chunk = torch.stack([tokens[e] for e in es[i:i + step]]).to(dev)
-                    buffer[i:i + len(chunk)] = plans.esm(chunk)[:, 1:-1, :]
-                    done += 1
-                    if progress:
-                        progress(done, total)
-                embeddings[length] = buffer
+        with self._device_scope(), self._fast_lock, torch.inference_mode():
             hla = torch.zeros(len(pairs), pair_width, 960, dtype=torch.float16, device=dev)
             hla_mask = torch.ones(len(pairs), pair_width, dtype=torch.bool, device=dev)
             for i in range(0, len(pairs), step):
-                chunk = pair_embeddings[i:i + step]
+                chunk = [torch.cat([self.hla.chain(a), self.hla.chain(b)]) for a, b in chains[i:i + step]]
                 width = max(max(map(len, chunk)), trt_engines.HLA_LEN[0])
                 x = torch.zeros(len(chunk), width, 960, dtype=torch.float16)
                 mask = torch.ones(len(chunk), width, dtype=torch.bool)
@@ -185,19 +214,35 @@ class Engine:
                     progress(done, total)
             pair_index = {pair: i for i, pair in enumerate(pairs)}
             pair_of_row = torch.tensor([pair_index[m] for m in mhc], device=dev)
-            epitope_of_row = torch.tensor([position[e] for e in epitope], device=dev)
             logits = torch.empty(len(mhc), dtype=torch.float16, device=dev)
-            for length, members in rows.items():
-                members = torch.tensor(members, device=dev)
-                for i in range(0, len(members), step):
-                    r = members[i:i + step]
-                    p = pair_of_row[r]
-                    logit = plans.joint(head, hla[p], embeddings[length][epitope_of_row[r]], hla_mask[p], torch.zeros(len(r), length, dtype=torch.bool, device=dev))
-                    logits[r] = logit[:, 0]
-                    done += 1
-                    if progress:
-                        progress(done, total)
+            for length, (members, positions, size, edges) in plan.items():
+                es = distinct[length]
+                for b in range(len(edges) - 1):
+                    start = b * size
+                    block = torch.empty(min(size, len(es) - start), length, 960, dtype=torch.float16, device=dev)
+                    for i in range(0, len(block), step):
+                        chunk = torch.stack([tokens[e] for e in es[start + i:start + i + step]]).to(dev)
+                        block[i:i + len(chunk)] = plans.esm(chunk)[:, 1:-1, :]
+                        done += 1
+                        if progress:
+                            progress(done, total)
+                    lo, hi = int(edges[b]), int(edges[b + 1])
+                    in_block = torch.from_numpy(members[lo:hi]).to(dev)
+                    row_in_block = torch.from_numpy(positions[lo:hi] - start).to(dev)
+                    for i in range(0, hi - lo, step):
+                        r = in_block[i:i + step]
+                        p = pair_of_row[r]
+                        logit = plans.joint(head, hla[p], block[row_in_block[i:i + step]], hla_mask[p], torch.zeros(len(r), length, dtype=torch.bool, device=dev))
+                        logits[r] = logit[:, 0]
+                        done += 1
+                        if progress:
+                            progress(done, total)
+                    del block
             logits = logits.cpu().numpy()
+            if torch.cuda.memory_reserved(dev) - torch.cuda.memory_allocated(dev) > 1 << 30:
+                torch.cuda.empty_cache()  # the GPU is shared with the portal: do not keep the cache of a large request
+        if not np.isfinite(logits).all():
+            raise FastUnavailable("TensorRT produced a non-finite logit")
         out["Logits"] = logits
         out["Score"] = score(logits)
         out.attrs["engine"] = "fast"
