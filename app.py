@@ -8,11 +8,11 @@ import os, sys
 from pathlib import Path
 utils_path = os.path.abspath('code')
 sys.path.insert(0, utils_path)
-from engine import Engine
+from engine import shared
 
 @st.cache_resource(show_spinner="Loading models...")
 def get_engine():
-    engine = Engine(root=Path(__file__).resolve().parent)
+    engine = shared(Path(__file__).resolve().parent)
     engine.hla.preload()
     return engine
 

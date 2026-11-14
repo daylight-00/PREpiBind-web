@@ -73,6 +73,19 @@ class FastUnavailable(Exception):
     """The fast path cannot take this request; the message says why."""
 
 
+_engines, _engines_lock = {}, threading.Lock()
+
+
+def shared(root="."):
+    """The process's Engine for `root`. Streamlit runs app.py as the main script and again as the module `app` that the pages import, so a cache inside app.py
+    builds two engines: two copies of the weights and plans on the GPU and of the HLA store in memory."""
+    key = str(Path(root).resolve())
+    with _engines_lock:
+        if key not in _engines:
+            _engines[key] = Engine(root=root)
+        return _engines[key]
+
+
 class Engine:
     def __init__(self, root=".", device=None, mode=None):
         root = Path(root)
