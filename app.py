@@ -1,6 +1,4 @@
 import streamlit as st
-from security_config import apply_security
-apply_security()
 import pandas as pd
 import re
 

@@ -1,109 +1,84 @@
 """
-Security header configuration for the PREpiBind Streamlit application.
+HTTP security headers and robots.txt, as the SNU information-security office asks for them (wscan scan and
+service request SR2507-08607, July 2025).
 
-Applied headers:
-  - X-Content-Type-Options: nosniff
-  - X-Frame-Options: SAMEORIGIN
-  - X-XSS-Protection: 1; mode=block
-  - Referrer-Policy: strict-origin-when-cross-origin
-  - HttpOnly + SameSite=Strict on all cookies
+Current Streamlit serves through Starlette and uvicorn, not Tornado, so the headers are added by an ASGI middleware.
+`serve.py` gives it to `st.App`: start the server with `streamlit run serve.py` (`streamlit run app.py` still works
+but sends none of this).
 
-Note: Content-Security-Policy is intentionally omitted. Streamlit injects
-inline scripts and styles that cannot be reconciled with a strict CSP without
-'unsafe-inline', which would negate its protective value. This limitation is
-inherent to the Streamlit framework.
+Every HTTP response (pages, static files, health and host-config routes, uploads) gets, replacing what the app set:
+  Content-Security-Policy, X-Frame-Options: SAMEORIGIN, X-Content-Type-Options: nosniff,
+  X-XSS-Protection: 1; mode=block (obsolete, browsers ignore it; the scan asks for it), Referrer-Policy
+`GET /robots.txt` and `GET <baseUrlPath>/robots.txt` answer with robots.txt of this directory ("User-agent: *", "Disallow: /").
 
-HSTS and Secure cookie flag are commented out; enable them if the server
-is deployed behind TLS termination.
+Deliberately not here:
+  Server header  uvicorn sends `Server: uvicorn` (no version) and the app cannot remove it; nginx's
+                 `more_clear_headers Server` does on the public route.
+  cookie flags   the app sets no cookie. Streamlit's only cookie is the XSRF token: its frontend reads it from
+                 JavaScript to send it with uploads, so it can never be HttpOnly, and without a login it protects
+                 nothing. `.streamlit/config.toml` turns it off; tests/test_security.py keeps it off.
+  HSTS           TLS ends in nginx, which sends it.
+
+The CSP allows inline scripts and styles, which Streamlit's frontend needs (an inline script in index.html,
+emotion's style tags) and the SNU office accepts, and WebAssembly (its protobuf library tries a wasm module for
+64-bit integers and falls back to JavaScript when blocked; `'wasm-unsafe-eval'` does not allow JavaScript eval);
+everything else is limited to the own origin and websockets. Checked in Chromium on every page, an upload, a
+prediction with its plots, a scan, an evaluation, a download: no violation.
 """
+from pathlib import Path
 
-import logging
-import streamlit as st
-
-logger = logging.getLogger(__name__)
-
-
-def setup_robots_txt():
-    """Serve robots.txt content via Streamlit query parameter fallback."""
-    @st.cache_data
-    def get_robots_txt():
-        return "User-agent: *\nDisallow: /"
-
-    query_params = st.query_params
-    if query_params.get("robots") is not None:
-        st.text(get_robots_txt())
-        st.stop()
-
-
-def setup_security_headers():
-    """Patch Tornado RequestHandler to inject security headers on every response."""
-    try:
-        import gc
-        import tornado.web
-
-        class SecureRobotsHandler(tornado.web.RequestHandler):
-            def set_default_headers(self):
-                self._apply_security_headers()
-
-            def _apply_security_headers(self):
-                self.clear_header("Server")
-                self.set_header("X-Content-Type-Options", "nosniff")
-                self.set_header("X-Frame-Options", "SAMEORIGIN")
-                self.set_header("X-XSS-Protection", "1; mode=block")
-                self.set_header("Referrer-Policy", "strict-origin-when-cross-origin")
-                # self.set_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-
-            def get(self):
-                self.set_header("Content-Type", "text/plain")
-                self.write("User-agent: *\nDisallow: /")
-
-        # Monkey-patch Tornado to apply headers to all handlers
-        original_init = tornado.web.RequestHandler.__init__
-        original_set_cookie = tornado.web.RequestHandler.set_cookie
-
-        def secure_init(self, *args, **kwargs):
-            original_init(self, *args, **kwargs)
-            try:
-                self.clear_header("Server")
-                self.set_header("X-Content-Type-Options", "nosniff")
-                self.set_header("X-Frame-Options", "SAMEORIGIN")
-                self.set_header("X-XSS-Protection", "1; mode=block")
-                self.set_header("Referrer-Policy", "strict-origin-when-cross-origin")
-            except Exception:
-                pass  # Handler not yet attached to a request context
-
-        def secure_set_cookie(self, name, value, **kwargs):
-            kwargs.setdefault("httponly", True)
-            kwargs.setdefault("samesite", "Strict")
-            # kwargs.setdefault("secure", True)  # Enable under TLS
-            return original_set_cookie(self, name, value, **kwargs)
-
-        tornado.web.RequestHandler.__init__ = secure_init
-        tornado.web.RequestHandler.set_cookie = secure_set_cookie
-
-        # Register robots.txt handler with the running Tornado application
-        _registered = False
-        for obj in gc.get_objects():
-            if hasattr(obj, "add_handlers") and "tornado" in str(type(obj)):
-                try:
-                    obj.add_handlers(r".*", [(r"/robots\.txt", SecureRobotsHandler)])
-                    _registered = True
-                    break
-                except Exception:
-                    continue
-
-        if not _registered:
-            logger.debug("security_config: robots.txt handler not registered (Tornado app not yet running)")
-
-    except Exception as e:
-        logger.warning("security_config: setup failed: %s", e)
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "media-src 'self' data: blob:; "
+    "worker-src 'self' blob:; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'self'"
+)
+HEADERS = [
+    (b"content-security-policy", CSP.encode()),
+    (b"x-frame-options", b"SAMEORIGIN"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-xss-protection", b"1; mode=block"),
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+]
+ROBOTS_TXT = (Path(__file__).resolve().parent / "robots.txt").read_bytes()
 
 
-def apply_security():
-    """Apply security headers and robots.txt handler."""
-    setup_security_headers()
-    setup_robots_txt()
+class SecurityHeaders:
+    """Pure ASGI middleware: HEADERS on every HTTP response, robots.txt answered here. `base_path` is Streamlit's server.baseUrlPath (read from its config on the first request when not given)."""
 
+    def __init__(self, app, base_path=None):
+        self.app = app
+        self.base_path = base_path
 
-if __name__ == "__main__":
-    apply_security()
+    def robots_paths(self):
+        if self.base_path is None:
+            from streamlit import config
+            self.base_path = config.get_option("server.baseUrlPath") or ""
+        base = self.base_path.strip("/")
+        return {"/robots.txt", f"/{base}/robots.txt"} if base else {"/robots.txt"}
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        names = {name for name, _ in HEADERS}
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                kept = [(k, v) for k, v in message.get("headers", []) if k.lower() not in names]
+                message = {**message, "headers": kept + HEADERS}
+            await send(message)
+
+        if scope["method"] in ("GET", "HEAD") and scope["path"] in self.robots_paths():
+            await send_with_headers({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(ROBOTS_TXT)).encode())]})
+            await send_with_headers({"type": "http.response.body", "body": ROBOTS_TXT})
+            return
+        await self.app(scope, receive, send_with_headers)

@@ -18,11 +18,12 @@ A Streamlit-based web server for predicting peptide binding to human and mouse M
 
 ```text
 PREpiBind-web/
-├── app.py                        # Entry point: model loading, session state, navigation
-├── security_config.py            # HTTP security headers via Tornado monkey-patching
+├── app.py                        # The Streamlit script: model loading, session state, navigation
+├── serve.py                      # ASGI entry point (st.App): app.py with the security headers
+├── security_config.py            # The security-headers middleware and the robots.txt route
 ├── pyproject.toml, uv.lock       # Environment (uv)
 ├── tests/                        # pytest: a GPU-free tier and a tier marked gpu (see Tests)
-├── robots.txt
+├── robots.txt                    # What /robots.txt answers
 ├── .streamlit/config.toml        # Streamlit server settings
 │
 ├── pages/
@@ -134,7 +135,7 @@ The server uses the first GPU that CUDA exposes. To use another one, set `CUDA_V
 ## Running the Server
 
 ```bash
-uv run streamlit run app.py \
+uv run streamlit run serve.py \
     --server.port 8501 \
     --server.baseUrlPath /prepibind
 ```
@@ -143,7 +144,9 @@ The server will be available at `http://localhost:8501/prepibind`.
 
 For production deployment behind a reverse proxy, set `--server.baseUrlPath` to match your proxy path prefix.
 
-`security_config.py` adds its security headers by patching Tornado. Current Streamlit serves through Starlette and uvicorn and does not install Tornado, so on this stack the patch only logs a warning and the headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, the cookie flags) are not sent. Until it is ported (Streamlit's `st.App` takes ASGI middleware), set them at the reverse proxy.
+`serve.py` is the ASGI entry point: it hands `app.py` to Streamlit's `st.App` together with the middleware of `security_config.py`, which sets `Content-Security-Policy`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection: 1; mode=block` and `Referrer-Policy` on every response and answers `/robots.txt` and `<base path>/robots.txt` with the `robots.txt` of this directory (`Disallow: /`). These are what the SNU information-security office's scan (wscan) asks of a service on the university domain. `streamlit run app.py` still works but sends none of them.
+
+Not in the app: the `Server` header (uvicorn sends `Server: uvicorn`, without a version; nginx removes it on the public route), HSTS (TLS ends in nginx) and cookie flags. The app sets no cookie: the XSRF token is the only one Streamlit has, its frontend reads it from JavaScript, so it cannot be HttpOnly (measured in Chromium: with an HttpOnly token every upload fails with 403) and without a login it protects nothing, so `.streamlit/config.toml` turns it off.
 
 ---
 
@@ -164,7 +167,7 @@ python code/build_engines.py   # about 3 minutes, once per TensorRT, driver or G
 
 ## Tests
 
-`tests/` has two tiers. The default tier needs no GPU, no checkpoints and no plans (the hard limits, how the engine routes a request and falls back, the staleness checks of the TensorRT plans; about two seconds). The tier marked `gpu` runs the real engine of the tree (fast against exact, an injected out-of-memory, a refused request, the memory of a large request) and skips itself without a CUDA GPU, the checkpoints or matching plans. pytest is in the `test` dependency group, which a plain `uv sync` does not install:
+`tests/` has two tiers. The default tier needs no GPU, no checkpoints and no plans (the hard limits, how the engine routes a request and falls back, the staleness checks of the TensorRT plans, the security headers and robots.txt; about two seconds). The tier marked `gpu` runs the real engine of the tree (fast against exact, an injected out-of-memory, a refused request, the memory of a large request) and skips itself without a CUDA GPU, the checkpoints or matching plans. pytest is in the `test` dependency group, which a plain `uv sync` does not install:
 
 ```bash
 uv run --python 3.14 --extra trt --group test pytest               # both tiers

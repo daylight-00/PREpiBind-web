@@ -1,5 +1,7 @@
 [server]
 maxUploadSize = 10
+# The XSRF token is the app's only cookie. Its frontend reads the cookie from JavaScript to send it with uploads, so it cannot be HttpOnly (which the SNU wscan scan asks for), and without a login there is nothing for it to protect. See security_config.py.
+enableXsrfProtection = false
 
 [browser]
 gatherUsageStats = false
