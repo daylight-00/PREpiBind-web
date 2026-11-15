@@ -1,12 +1,12 @@
-"""Inference engine of the img1 web server: the four PREpiBind heads behind one ESM C 300M, as plain functions of a DataFrame.
+"""Inference engine of the img1 web server: the four PREpiBind heads behind one ESMC 300M, as plain functions of a DataFrame.
 
 It replaces what the baseline spread over app.py (model loading), inference.py (DataLoader, Streamlit progress bar, sigmoid) and encoder.py / dataprovider.py (HLA lookup, tokenising):
 no Streamlit import, no DataLoader workers, no configuration file executed as code, no hard-coded GPU index (select the GPU with CUDA_VISIBLE_DEVICES). The arithmetic is the baseline's:
-the same batches (consecutive `batch_size` rows), the same collate functions, the same fp16 modules; the one change in structure is a single ESM C shared by the four heads instead of
+the same batches (consecutive `batch_size` rows), the same collate functions, the same fp16 modules; the one change in structure is a single ESMC shared by the four heads instead of
 four copies of the same weights.
 
 Two ways to run a request. The EXACT path is the baseline's arithmetic in eager mode (bitwise equal to the baseline code in the same environment). The FAST path
-(`_run_fast`) computes every distinct epitope through ESM C once and every distinct HLA pair through the head's HLA encoder once, runs the joint blocks per batch of
+(`_run_fast`) computes every distinct epitope through ESMC once and every distinct HLA pair through the head's HLA encoder once, runs the joint blocks per batch of
 rows of one epitope length, and executes the three kinds of graph as TensorRT fp16 plans (trt_engines.py): most rows differ from the exact path in the last bits (mean
 0.01-0.02 logits), about 0.1 % of the rows change sign (almost all within 0.15 logits of the threshold), 4.5x faster on bulk uploads and in less GPU memory.
 `PREPIBIND_ENGINE` picks: `auto` (default) = fast when plans for this TensorRT and GPU are loaded and the request is in the plans' ranges, else exact; `fast` = fast or
@@ -205,7 +205,7 @@ class Engine:
         return torch.cuda.device(self.device) if self.device.type == "cuda" else contextlib.nullcontext()
 
     def _run_fast(self, df, head, batch_size, progress, store):
-        """Distinct epitopes through ESM C, distinct HLA pairs through the head's HLA encoder, then the joint blocks, in batches of rows of one epitope length (no padding
+        """Distinct epitopes through ESMC, distinct HLA pairs through the head's HLA encoder, then the joint blocks, in batches of rows of one epitope length (no padding
         of the epitope side); the logits go back to the rows' order. The memory of a request is bounded whatever its size: the epitope embeddings are held in blocks of at most
         EMBEDDING_BUDGET bytes (rows are ordered by their epitope), at most MAX_PAIRS distinct pairs are encoded at once and their embeddings are built chunk by chunk.
         Raises FastUnavailable for what the plans do not cover."""
@@ -334,7 +334,7 @@ class Engine:
         return ("full chain",) if report["tier"] == "no domain" else (report["tier"], report["start"], report["end"], report["hit"])
 
     def _domain_embedding(self, chain, start, end, hit):
-        """The embedding of the domain [start, end) of `chain` as the model was trained on it: the whole chain through ESM C, with the nearest chain's flanks added where a located chain has less of them
+        """The embedding of the domain [start, end) of `chain` as the model was trained on it: the whole chain through ESMC, with the nearest chain's flanks added where a located chain has less of them
         (`hit`; a window the user gave is cut as it is), then the domain's positions. Float16 on the CPU, like the stored embeddings."""
         grafted, offset = self.locator.complete_flanks(chain, hit) if hit else (chain, 0)
         tokens = torch.as_tensor(tokenize(grafted), dtype=torch.long).unsqueeze(0).to(self.device)

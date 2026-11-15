@@ -1,6 +1,6 @@
 """Locating the peptide-binding domain of an MHC class II chain from its sequence alone.
 
-The model's HLA input is the domain of a chain (58-82 residues) cut out of the ESM C embedding of the FULL chain; the allele catalogue stores each chain's window [start_idx, end_idx). For a chain that is not in the
+The model's HLA input is the domain of a chain (58-82 residues) cut out of the ESMC embedding of the FULL chain; the allele catalogue stores each chain's window [start_idx, end_idx). For a chain that is not in the
 catalogue the window is found by alignment to the catalogue: a 4-mer index picks the nearest few chains, a BLOSUM62 alignment with free end gaps (fragments and full-length chains both occur) chooses among them, and the
 nearest chain's window is carried across the alignment to the query. The identity of the query with the reference over the reference's window is the confidence. Measured on the catalogue itself (the prototype of
 261112_img1_web_ideas, `locator_check.py`): within 2 residues of the true window for 99.8 % of the chains with their own entry removed and 99.5 % with their whole gene removed; by identity 0.5 and up 98.5-99.9 %,

@@ -8,7 +8,7 @@
 > Jang DH, Kim D, Choi Y, Lee J.
 > *TBD* (2026)
 
-A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESM C 300M protein language model embeddings. The server implements four task-specific models trained on qualitative binding, mass spectrometry ligandomics, and thresholded IC50 data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
+A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESMC 300M protein language model embeddings. The server implements four task-specific models trained on qualitative binding, mass spectrometry ligandomics, and thresholded IC50 data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
 
 **Live server:** [https://lcdd.snu.ac.kr/prepibind](https://lcdd.snu.ac.kr/prepibind)
 
@@ -37,8 +37,8 @@ PREpiBind-web/
 │
 ├── code/
 │   ├── model.py                  # Neural network architecture (plm_cat_mean_inf)
-│   ├── embedder.py               # ESM C 300M epitope/HLA embedder (loads the released checkpoint)
-│   ├── engine.py                 # Inference engine: four heads on one ESM C, HLA store, batching, scores
+│   ├── embedder.py               # ESMC 300M epitope/HLA embedder (loads the released checkpoint)
+│   ├── engine.py                 # Inference engine: four heads on one ESMC, HLA store, batching, scores
 │   ├── scan.py                   # Protein scan: FASTA, windows, allele panels, limits (plain Python)
 │   ├── trt_engines.py            # Fast engine: TensorRT fp16 plans (build, load, run)
 │   ├── build_engines.py          # Builds the plans for this TensorRT version and GPU
@@ -93,7 +93,7 @@ uv sync
 
 ### 2. Model checkpoints
 
-Download the ESM C 300M base model (FP16) and the four task checkpoints released with the paper (float16 copies) from HuggingFace and place them in `models/`:
+Download the ESMC 300M base model (FP16) and the four task checkpoints released with the paper (float16 copies) from HuggingFace and place them in `models/`:
 
 ```bash
 huggingface-cli download daylight-00/esmc-300m-2024-12 --local-dir models/
@@ -113,7 +113,7 @@ models/
 
 ### 3. Download pre-computed HLA embeddings
 
-Pre-computed ESM C 300M embeddings for all 7,282 IPD-IMGT/HLA alleles are required for Standard Mode:
+Pre-computed ESMC 300M embeddings for all 7,282 IPD-IMGT/HLA alleles are required for Standard Mode:
 
 ```bash
 huggingface-cli download daylight-00/emb_hla_esmc_small_0601_fp16 \
@@ -149,7 +149,7 @@ Not in the app: the `Server` header (uvicorn sends `Server: uvicorn`, without a 
 
 ## Fast engine (TensorRT)
 
-The engine has two paths. The **exact** path is the baseline's arithmetic in eager mode (bitwise equal to the baseline code in the same environment). The **fast** path computes every distinct epitope through ESM C once and every distinct HLA pair through the head's HLA encoder once, runs the joint blocks in batches of rows of one epitope length, and executes the three parts as TensorRT fp16 plans. On the four built-in test sets it is 3.4 to 6.0 times faster (48,352 rows in 6.4 s against 24.4 s), and the plans of all four heads take 1.8 GB of GPU memory (2.9 GB in total with the exact path's weights, which stay resident).
+The engine has two paths. The **exact** path is the baseline's arithmetic in eager mode (bitwise equal to the baseline code in the same environment). The **fast** path computes every distinct epitope through ESMC once and every distinct HLA pair through the head's HLA encoder once, runs the joint blocks in batches of rows of one epitope length, and executes the three parts as TensorRT fp16 plans. On the four built-in test sets it is 3.4 to 6.0 times faster (48,352 rows in 6.4 s against 24.4 s), and the plans of all four heads take 1.8 GB of GPU memory (2.9 GB in total with the exact path's weights, which stay resident).
 
 It is not bit-identical. Against the exact path 0.05 to 0.15 % of the rows change sign on the built-in sets, almost all within 0.15 logits of the decision threshold, and the AUC moves by at most 0.00005. Mixed epitope lengths differ by design: the exact path pads a batch to its longest epitope and the epitope encoder sees the padding, so the logit of a short epitope depends on the other epitopes of its batch; the fast path never pads the epitope side. Custom Mode, epitopes shorter than 8 or longer than 32 residues, HLA pairs longer than 200 residues and requests with more than 2,048 distinct HLA pairs always run on the exact path.
 
@@ -175,7 +175,7 @@ uv run --python 3.14 --extra trt --group test pytest -m "not gpu"  # no GPU need
 
 ## Model Architecture
 
-The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA embedding (concatenated alpha + beta chain from ESM C 300M) and a tokenized peptide sequence — and processes them through:
+The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA embedding (concatenated alpha + beta chain from ESMC 300M) and a tokenized peptide sequence — and processes them through:
 
 1. Separate two-block self-attention encoders for HLA and epitope representations
 2. A single joint interaction block (concatenation + self-attention)
@@ -184,7 +184,7 @@ The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA e
 The output score is sigmoid-transformed; scores ≥ 0.5 indicate predicted binding.
 
 **Standard Mode** uses pre-computed embeddings stored in `data/emb_hla_esmc_small_0601_fp16/`.
-**Custom HLA Mode** takes the HLA chains as sequences. A pair of chains that are both in the allele catalogue (`data/mhc_mapping.csv`, the same sequence) is scored exactly as Standard Mode scores the two alleles (the stored embeddings and, where it can, the fast path; the result table says `catalogue` in the column `HLA chains`). Any other chain (including non-human alleles such as Mamu, SLA, and BoLA) has its domain located by alignment to the catalogue (`code/locator.py`: a 4-mer index picks the nearest chains, a BLOSUM62 alignment with free end gaps chooses among them and carries the nearest chain's window across; Biopython), is embedded on-the-fly with ESM C and has the domain cut out, as the stored embeddings are; a domain pasted without its flanks gets the nearest chain's flanks added. The identity with the nearest chain over its window decides: 0.5 or more `located`, 0.4 to 0.5 `low confidence`, and Start and End typed on the page give a `manual window`. Below 0.4 no domain is found and the chain is embedded over its full length, as in earlier versions, marked `full chain` and not validated (its HLA input would be 254-266 positions instead of the 58-82 the model was trained on). Measured on the 6,400-row custom sample with every chain treated as unknown and its own entry or its whole gene hidden from the search: full chains differ from Standard Mode in 0.23 to 0.31 % of the signs (AUC 0.9182 against 0.9186; the earlier full-chain run: 7.4 %, 0.9104), domains pasted alone in 0.4 to 3.1 %; locating a chain takes 3 ms and embedding it 6 ms (`261115_img1_web_snu_conditions/swap_eval/custom_step2_check_released.json` and `custom_legacy_released.json`, the released Qualitative head).
+**Custom HLA Mode** takes the HLA chains as sequences. A pair of chains that are both in the allele catalogue (`data/mhc_mapping.csv`, the same sequence) is scored exactly as Standard Mode scores the two alleles (the stored embeddings and, where it can, the fast path; the result table says `catalogue` in the column `HLA chains`). Any other chain (including non-human alleles such as Mamu, SLA, and BoLA) has its domain located by alignment to the catalogue (`code/locator.py`: a 4-mer index picks the nearest chains, a BLOSUM62 alignment with free end gaps chooses among them and carries the nearest chain's window across; Biopython), is embedded on-the-fly with ESMC and has the domain cut out, as the stored embeddings are; a domain pasted without its flanks gets the nearest chain's flanks added. The identity with the nearest chain over its window decides: 0.5 or more `located`, 0.4 to 0.5 `low confidence`, and Start and End typed on the page give a `manual window`. Below 0.4 no domain is found and the chain is embedded over its full length, as in earlier versions, marked `full chain` and not validated (its HLA input would be 254-266 positions instead of the 58-82 the model was trained on). Measured on the 6,400-row custom sample with every chain treated as unknown and its own entry or its whole gene hidden from the search: full chains differ from Standard Mode in 0.23 to 0.31 % of the signs (AUC 0.9182 against 0.9186; the earlier full-chain run: 7.4 %, 0.9104), domains pasted alone in 0.4 to 3.1 %; locating a chain takes 3 ms and embedding it 6 ms (`261115_img1_web_snu_conditions/swap_eval/custom_step2_check_released.json` and `custom_legacy_released.json`, the released Qualitative head).
 
 ---
 
@@ -216,7 +216,7 @@ Column headers must match exactly. Allele names must follow WHO HLA nomenclature
 
 ## Notes on Allele Coverage
 
-The server provides pre-computed ESM C embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **148 unique HLA dimers** (27 alpha × 88 beta chains; Qualitative dataset, 138 for MS and 67 for IC50; 151 across all the data) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
+The server provides pre-computed ESMC embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **148 unique HLA dimers** (27 alpha × 88 beta chains; Qualitative dataset, 138 for MS and 67 for IC50; 151 across all the data) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
 
 MHC alleles of other species (non-human primates, pigs, cattle) are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for them. The paper did not evaluate these, so their results are not validated.
 
@@ -237,11 +237,13 @@ If you use PREpiBind or this web server, please cite:
 }
 ```
 
-The ESM C 300M weights are released under the MIT License by Chan Zuckerberg Biohub ([`biohub/esmc-300m-2024-12`](https://huggingface.co/biohub/esmc-300m-2024-12)).
+The ESMC 300M weights are released under the MIT License by Chan Zuckerberg Biohub ([`biohub/esmc-300m-2024-12`](https://huggingface.co/biohub/esmc-300m-2024-12)).
 
 ---
 
 ## License
 
 The PREpiBind web server source code is released under the [MIT License](LICENSE).
-ESM C 300M model weights are released under the MIT License (Chan Zuckerberg Biohub).
+The ESMC 300M weights are released under the MIT License (Chan Zuckerberg Biohub).
+
+The data are not MIT: the tables under `data/` derive from IEDB (CC BY 4.0), IPD-IMGT/HLA (CC BY-NoDerivs) and UniProt (CC BY 4.0). Terms and attribution are in the [third-party notices](https://github.com/daylight-00/PREpiBind/blob/main/THIRD_PARTY_NOTICES.md) of the PREpiBind repository. Third-party models, weights and tools carry their own terms.

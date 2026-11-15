@@ -56,7 +56,7 @@ with col1:
 - PREpiBind web server code: ~[GitHub](https://github.com/daylight-00/PREpiBind-web)~
 - PREpiBind checkpoints released with the paper (the server runs the float16 copies): [HuggingFace (float32)](https://huggingface.co/daylight-00/prepibind), [HuggingFace (float16 demo)](https://huggingface.co/daylight-00/prepibind-demo)
 - Pre-computed MHC-II embeddings: [HuggingFace](https://huggingface.co/datasets/daylight-00/prepibind-embeddings)
-- ESM C 300M weights: [HuggingFace](https://huggingface.co/biohub/esmc-300m-2024-12)
+- ESMC 300M weights: [HuggingFace](https://huggingface.co/biohub/esmc-300m-2024-12)
     """)
 
 
@@ -64,8 +64,8 @@ with col2:
     st.markdown("##### **Licensing Information**")
     st.markdown("""
 - PREpiBind source code, web server code, and checkpoints: **MIT License**
-- ESM C 300M weights (Chan Zuckerberg Biohub): **MIT License**
-- Training data derive from IEDB (CC BY 4.0); allele sequences from IPD-IMGT/HLA (CC BY-NoDerivs) and UniProt (CC BY 4.0). The repository's third-party notices have the detail.
+- ESMC 300M weights (Chan Zuckerberg Biohub): **MIT License**
+- Training data derive from IEDB (CC BY 4.0); allele sequences from IPD-IMGT/HLA (CC BY-NoDerivs) and UniProt (CC BY 4.0). Terms and attribution: the [third-party notices](https://github.com/daylight-00/PREpiBind/blob/main/THIRD_PARTY_NOTICES.md) of the PREpiBind repository.
     """)
 
 st.markdown("""

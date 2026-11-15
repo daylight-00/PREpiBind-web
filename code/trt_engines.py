@@ -1,7 +1,7 @@
 """TensorRT plans of the fast engine: build (export and compile), load, run.
 
 The model is cut where the cache path of `Engine._run_fast` cuts it, and the cuts get dynamic shapes:
-    esm    epitope tokens (B, S) -> ESM C embeddings (B, S, 960); one engine, shared by the four heads (identical weights)
+    esm    epitope tokens (B, S) -> ESMC embeddings (B, S, 960); one engine, shared by the four heads (identical weights)
     hla    (B, L, 960) and its mask -> the head's two-block HLA encoder; a function of the HLA pair alone
     joint  HLA encoding, epitope embeddings and their masks -> logit (B, 1): epitope encoder, joint block, pooling, output layer
 All fp16 (TensorRT 11 networks are strongly typed: the dtypes of the exported graph decide the precision). Plans are files under models/engines/<tensorrt>-<gpu>/
@@ -63,7 +63,7 @@ def _mismatch(manifest, roles):
 
 
 def load(root, files, heads):
-    """(Plans, None) when plans for this TensorRT, GPU and graph version exist and were built from `files` (the ESM C checkpoint, then one per head in the order of `heads`); else (None, the reason)."""
+    """(Plans, None) when plans for this TensorRT, GPU and graph version exist and were built from `files` (the ESMC checkpoint, then one per head in the order of `heads`); else (None, the reason)."""
     if trt is None:
         return None, "TensorRT is not installed (extra 'trt'; NVIDIA publishes no TensorRT wheel for Python 3.15 yet)"
     if not torch.cuda.is_available():
@@ -204,7 +204,7 @@ def _compile(onnx_path, profile, plan_path):
 
 def build(embedder, heads, files, root, log=print):
     """Export the three kinds of graph from the eager modules (`embedder`: the Embedder; `heads`: {name: plm_cat_mean_inf}, fp16 on the GPU) and compile them.
-    `files` are the checkpoints the modules were loaded from (the ESM C checkpoint, then one per head in the order of `heads`); the manifest written last records them."""
+    `files` are the checkpoints the modules were loaded from (the ESMC checkpoint, then one per head in the order of `heads`); the manifest written last records them."""
     from torch.export import Dim
 
     directory = plan_dir(root)

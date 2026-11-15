@@ -77,7 +77,7 @@ def write_st_end():
     st.markdown(
         "[Lab of Computational Drug Discovery](https://sites.google.com/view/lcbc) | [College of Pharmacy, Seoul National University](https://snupharm.snu.ac.kr/en/)"
     )
-    st.markdown("© 2025 David Hyunyoo Jang | Built with ESM")
+    st.markdown("© 2025 David Hyunyoo Jang")
 
 if __name__ == "__main__":  # not when a page imports this module
     pg = st.navigation([
