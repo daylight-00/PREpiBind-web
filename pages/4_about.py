@@ -12,19 +12,14 @@ st.markdown("**P**rotein **R**epresentation-integrated **Epi**tope-MHC Class II 
 
 # Authors section
 st.markdown("""
-### Development Team
-For inquiries regarding the web server, please contact the developers.
+### Developer
+The web server was developed and is maintained by **David Hyunyoo Jang**.
+For inquiries regarding the web server, please contact the developer:
+[hwjang00@snu.ac.kr](mailto:hwjang00@snu.ac.kr) | [GitHub](https://github.com/daylight-00)
 
-- **David Hyunyoo Jang** *(Primary Developer)*
-  [hwjang00@snu.ac.kr](mailto:hwjang00@snu.ac.kr) | [GitHub](https://github.com/daylight-00)
-
-- **Dongwoo Kim** *(Co-developer)*
-  [dingoh@snu.ac.kr](mailto:dingoh@snu.ac.kr)
-
-- **Juyong Lee** *(Corresponding Author, PI)*
-  [nicole23@snu.ac.kr](mailto:nicole23@snu.ac.kr)
-
-[Lab of Computational Drug Discovery (LCBC)](https://sites.google.com/view/lcbc) | [College of Pharmacy, Seoul National University](https://snupharm.snu.ac.kr/en/)
+### Administration and Resources
+- **Project administration:** Dongwoo Kim
+- **Resources:** the computing resources of the [Laboratory of Computational Drug Discovery (LCDD)](https://sites.google.com/view/lcbc), [College of Pharmacy, Seoul National University](https://snupharm.snu.ac.kr/en/)
 
 """)
 

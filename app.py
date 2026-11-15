@@ -72,10 +72,10 @@ if "data_paths" not in st.session_state:
 def write_st_end():
     st.markdown("---")
     st.markdown(
-        "Developed and Maintained by David Hyunyoo Jang, Dongwoo Kim and Juyong Lee"
+        "Developed and Maintained by David Hyunyoo Jang"
     )
     st.markdown(
-        "[Lab of Computational Drug Discovery](https://sites.google.com/view/lcbc) | [College of Pharmacy, Seoul National University](https://snupharm.snu.ac.kr/en/)"
+        "[Laboratory of Computational Drug Discovery (LCDD)](https://sites.google.com/view/lcbc) | [College of Pharmacy, Seoul National University](https://snupharm.snu.ac.kr/en/)"
     )
     st.markdown("© 2025 David Hyunyoo Jang")
 
