@@ -1,5 +1,6 @@
 # ── Model weights (download from HuggingFace; see About page for links) ─────
 models/*.pth
+models/*.pt
 models/.cache/
 models/engines
 

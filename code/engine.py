@@ -34,16 +34,18 @@ from model import UnifiedModel, UnifiedModel_custom_hla, plm_cat_mean_inf
 ESM_CHECKPOINT = "esmc_300m_2024_12_v0_fp16.pth"
 HLA_DIR = "data/emb_hla_esmc_small_0601_fp16"
 CATALOGUE = "data/mhc_mapping.csv"  # allele name, full chain sequence and the domain window [start_idx, end_idx) the stored embedding was cut to
+# The four task checkpoints released with the paper (float16 copies: huggingface.co/daylight-00/prepibind-demo). Each is the run with the lowest validation loss among the 15 runs (3 seeds x 5 folds) the paper reports for the task, chosen without
+# any test-set quantity; the seed and the fold are in the names. One run, not the paper's mean over the 15. Before 2026-11-15 the server loaded other runs of the same tasks (prepi_esmc_small_*_e5_s128_f4 and others, never published).
 HEAD_CHECKPOINTS = {
-    "Qualitative": "prepi_esmc_small_e5_s128_f4_fp16.pth",
-    "Mass Spectrometry": "prepi_esmc_small_ms_e5_s100_f0_fp16.pth",
-    "IC50 (<500nM)": "prepi_esmc_small_ic50_500_e5_s128_f4_fp16.pth",
-    "IC50 (<1000nM)": "prepi_esmc_small_ic50_1000_e5_s128_f1_fp16.pth",
+    "Qualitative": "prepibind_qualitative_s100_f0_fp16.pt",
+    "Mass Spectrometry": "prepibind_ms_s128_f3_fp16.pt",
+    "IC50 (<500nM)": "prepibind_ic50_500_s128_f2_fp16.pt",
+    "IC50 (<1000nM)": "prepibind_ic50_1000_s42_f1_fp16.pt",
 }
 HEAD_ARGS = {"hla_dim": 960, "epi_dim": 960, "head_div": 64}
 EMBEDDING_BUDGET = 1 << 30  # bytes of epitope embeddings the fast path holds at once (about 37,000 distinct 15-mers, 17,000 distinct 32-mers)
 MAX_PAIRS = 2048  # distinct HLA pairs the fast path encodes at once (the pair encodings take 0.6 GB); a request with more runs on the exact path
-MAX_EPITOPE_LENGTH = 20  # residues, refused above (261115_img1_web_caps_scan_custom): the heads were trained on 15-mers only and with random flanks the AUC falls from 0.93 at 15 to 0.87 at 20 and 0.80 at 25 (a shuffled epitope: 0.79) while the share of non-binders scored above 0.5 rises from 15 % to 29 % and 49 %
+MAX_EPITOPE_LENGTH = 20  # residues, refused above (261115_img1_web_caps_scan_custom): the heads were trained on 15-mers only and with random flanks the AUC falls from 0.93 at 15 to 0.87 at 20 and 0.82 at 25 (a shuffled epitope: 0.80) while the share of non-binders scored above 0.5 rises from 15 % to 27 % and 41 % (the released Qualitative head, 261115_img1_web_snu_conditions/swap_eval/length)
 MAX_CHAIN_LENGTH = 300  # residues of an HLA chain given as a sequence (Custom Mode), refused above: the allele catalogue's longest chain has 285, 99 % have at most 266
 
 _tokenizer = EsmSequenceTokenizer()

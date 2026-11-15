@@ -93,21 +93,22 @@ uv sync
 
 ### 2. Model checkpoints
 
-Download the ESM C 300M base model (FP16) from HuggingFace and place it in `models/`:
+Download the ESM C 300M base model (FP16) and the four task checkpoints released with the paper (float16 copies) from HuggingFace and place them in `models/`:
 
 ```bash
 huggingface-cli download daylight-00/esmc-300m-2024-12 --local-dir models/
+huggingface-cli download daylight-00/prepibind-demo --local-dir models/
 ```
 
-The four task checkpoints are not published on HuggingFace. The checkpoints released with the paper, [`daylight-00/prepibind`](https://huggingface.co/daylight-00/prepibind) (float32) and [`daylight-00/prepibind-demo`](https://huggingface.co/daylight-00/prepibind-demo) (float16), are other runs of the same four tasks under other file names (`prepibind_<arm>_s<seed>_f<fold>.pt`). The server expects these files in `models/`:
+Each task checkpoint is one run: the one with the lowest validation loss among the 15 runs (3 seeds x 5 folds) the paper reports for that task, chosen without any test-set quantity; the seed and the fold are in the file name. The paper's numbers are means over the 15 runs, so a single checkpoint does not reproduce them exactly. [`daylight-00/prepibind`](https://huggingface.co/daylight-00/prepibind) holds the float32 originals. The server expects these files in `models/`:
 
 ```text
 models/
 ├── esmc_300m_2024_12_v0_fp16.pth
-├── prepi_esmc_small_e5_s128_f4_fp16.pth        # Qualitative
-├── prepi_esmc_small_ms_e5_s100_f0_fp16.pth     # Mass Spectrometry
-├── prepi_esmc_small_ic50_500_e5_s128_f4_fp16.pth    # IC50 <500 nM
-└── prepi_esmc_small_ic50_1000_e5_s128_f1_fp16.pth   # IC50 <1000 nM
+├── prepibind_qualitative_s100_f0_fp16.pt       # Qualitative
+├── prepibind_ms_s128_f3_fp16.pt                # Mass Spectrometry
+├── prepibind_ic50_500_s128_f2_fp16.pt          # IC50 <500 nM
+└── prepibind_ic50_1000_s42_f1_fp16.pt          # IC50 <1000 nM
 ```
 
 ### 3. Download pre-computed HLA embeddings
@@ -150,7 +151,7 @@ Not in the app: the `Server` header (uvicorn sends `Server: uvicorn`, without a 
 
 The engine has two paths. The **exact** path is the baseline's arithmetic in eager mode (bitwise equal to the baseline code in the same environment). The **fast** path computes every distinct epitope through ESM C once and every distinct HLA pair through the head's HLA encoder once, runs the joint blocks in batches of rows of one epitope length, and executes the three parts as TensorRT fp16 plans. On the four built-in test sets it is 3.4 to 6.0 times faster (48,352 rows in 6.4 s against 24.4 s), and the plans of all four heads take 1.8 GB of GPU memory (2.9 GB in total with the exact path's weights, which stay resident).
 
-It is not bit-identical. Against the exact path 0.08 to 0.16 % of the rows change sign on the built-in sets, almost all within 0.15 logits of the decision threshold, and the AUC moves by at most 0.00004. Mixed epitope lengths differ by design: the exact path pads a batch to its longest epitope and the epitope encoder sees the padding, so the logit of a short epitope depends on the other epitopes of its batch; the fast path never pads the epitope side. Custom Mode, epitopes shorter than 8 or longer than 32 residues, HLA pairs longer than 200 residues and requests with more than 2,048 distinct HLA pairs always run on the exact path.
+It is not bit-identical. Against the exact path 0.05 to 0.15 % of the rows change sign on the built-in sets, almost all within 0.15 logits of the decision threshold, and the AUC moves by at most 0.00005. Mixed epitope lengths differ by design: the exact path pads a batch to its longest epitope and the epitope encoder sees the padding, so the logit of a short epitope depends on the other epitopes of its batch; the fast path never pads the epitope side. Custom Mode, epitopes shorter than 8 or longer than 32 residues, HLA pairs longer than 200 residues and requests with more than 2,048 distinct HLA pairs always run on the exact path.
 
 ```bash
 uv sync --python 3.14 --extra trt   # Python 3.14: NVIDIA publishes no TensorRT wheel for Python 3.15 yet (a plain `uv sync` picks 3.15 where it is installed)
@@ -183,7 +184,7 @@ The prediction model (`code/model.py`) takes two inputs — a pre-computed HLA e
 The output score is sigmoid-transformed; scores ≥ 0.5 indicate predicted binding.
 
 **Standard Mode** uses pre-computed embeddings stored in `data/emb_hla_esmc_small_0601_fp16/`.
-**Custom HLA Mode** takes the HLA chains as sequences. A pair of chains that are both in the allele catalogue (`data/mhc_mapping.csv`, the same sequence) is scored exactly as Standard Mode scores the two alleles (the stored embeddings and, where it can, the fast path; the result table says `catalogue` in the column `HLA chains`). Any other chain (including non-human alleles such as Mamu, SLA, and BoLA) has its domain located by alignment to the catalogue (`code/locator.py`: a 4-mer index picks the nearest chains, a BLOSUM62 alignment with free end gaps chooses among them and carries the nearest chain's window across; Biopython), is embedded on-the-fly with ESM C and has the domain cut out, as the stored embeddings are; a domain pasted without its flanks gets the nearest chain's flanks added. The identity with the nearest chain over its window decides: 0.5 or more `located`, 0.4 to 0.5 `low confidence`, and Start and End typed on the page give a `manual window`. Below 0.4 no domain is found and the chain is embedded over its full length, as in earlier versions, marked `full chain` and not validated (its HLA input would be 254-266 positions instead of the 58-82 the model was trained on). Measured on the 6,400-row custom sample with every chain treated as unknown and its own entry or its whole gene hidden from the search: full chains differ from Standard Mode in 0.34 to 0.39 % of the signs (AUC 0.9245 against 0.9250; the earlier full-chain run: 8 %, 0.9153), domains pasted alone in 0.5 to 2.7 %; locating a chain takes 3 ms and embedding it 6 ms (`261115_img1_web_caps_scan_custom/custom_step2_check.json`).
+**Custom HLA Mode** takes the HLA chains as sequences. A pair of chains that are both in the allele catalogue (`data/mhc_mapping.csv`, the same sequence) is scored exactly as Standard Mode scores the two alleles (the stored embeddings and, where it can, the fast path; the result table says `catalogue` in the column `HLA chains`). Any other chain (including non-human alleles such as Mamu, SLA, and BoLA) has its domain located by alignment to the catalogue (`code/locator.py`: a 4-mer index picks the nearest chains, a BLOSUM62 alignment with free end gaps chooses among them and carries the nearest chain's window across; Biopython), is embedded on-the-fly with ESM C and has the domain cut out, as the stored embeddings are; a domain pasted without its flanks gets the nearest chain's flanks added. The identity with the nearest chain over its window decides: 0.5 or more `located`, 0.4 to 0.5 `low confidence`, and Start and End typed on the page give a `manual window`. Below 0.4 no domain is found and the chain is embedded over its full length, as in earlier versions, marked `full chain` and not validated (its HLA input would be 254-266 positions instead of the 58-82 the model was trained on). Measured on the 6,400-row custom sample with every chain treated as unknown and its own entry or its whole gene hidden from the search: full chains differ from Standard Mode in 0.23 to 0.31 % of the signs (AUC 0.9182 against 0.9186; the earlier full-chain run: 7.4 %, 0.9104), domains pasted alone in 0.4 to 3.1 %; locating a chain takes 3 ms and embedding it 6 ms (`261115_img1_web_snu_conditions/swap_eval/custom_step2_check_released.json` and `custom_legacy_released.json`, the released Qualitative head).
 
 ---
 
@@ -207,7 +208,7 @@ HLA-DQA1*05:01,HLA-DQB1*02:01,PKYVKQNTLKLATAA,0
 
 Column headers must match exactly. Allele names must follow WHO HLA nomenclature and be present in `data/mhc_mapping.csv`. The model was trained on 15-mer peptides; other lengths up to 20 residues are accepted but not validated.
 
-**Limits (hard, in `code/engine.py`):** an epitope of more than `MAX_EPITOPE_LENGTH` = 20 residues and, in Custom Mode, an HLA chain of more than `MAX_CHAIN_LENGTH` = 300 residues are refused by the pages with a message and by `Engine.run` / `Engine.run_custom` with a `RequestRefused` (a `ValueError`). Why 20: every built-in data set is 15-mers only, so the range cannot be read from the data; it was measured by keeping each test 15-mer as the core and adding random flanks (`261115_img1_web_caps_scan_custom/length_auc*.json`): the Qualitative AUC is 0.93 at 15 residues, 0.87 at 20 and 0.80 at 25 (a shuffled epitope gives 0.79), the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20 and 49 % at 25, and each of the three heads measured (Qualitative, Mass Spectrometry, IC50 <500nM) steps down between 20 and 21 residues (AUC -0.036, -0.020 and -0.031). The chain limit is the allele catalogue's longest chain (285) rounded up. A test or a benchmark that needs longer input sets the two constants itself.
+**Limits (hard, in `code/engine.py`):** an epitope of more than `MAX_EPITOPE_LENGTH` = 20 residues and, in Custom Mode, an HLA chain of more than `MAX_CHAIN_LENGTH` = 300 residues are refused by the pages with a message and by `Engine.run` / `Engine.run_custom` with a `RequestRefused` (a `ValueError`). Why 20: every built-in data set is 15-mers only, so the range cannot be read from the data; it was measured by keeping each test 15-mer as the core and adding random flanks (`261115_img1_web_snu_conditions/swap_eval/length/length_auc*.json`, the released heads): the Qualitative AUC is 0.93 at 15 residues, 0.87 at 20 and 0.82 at 25 (a shuffled epitope gives 0.80), the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 27 % at 20 and 41 % at 25, and each of the four heads steps down between 20 and 21 residues (AUC -0.031 Qualitative, -0.014 Mass Spectrometry, -0.025 IC50 <500nM, -0.039 IC50 <1000nM). The chain limit is the allele catalogue's longest chain (285) rounded up. A test or a benchmark that needs longer input sets the two constants itself.
 
 **Protein scan limits (`code/scan.py`):** at most 5,000 residues, 100 alleles and 500,000 predictions (windows x alleles x window lengths) per scan, 100,000 predictions while the fast engine is unavailable. They come from the measured throughput (`261115_img1_web_caps_scan_custom/scan_throughput.json`): the fast path scores 16,000 to 17,000 predictions per second from 13,000 to 1,200,000 predictions, with the GPU memory staying under 350 MiB over the engine's own; the exact path about 2,000 per second. 500,000 predictions are about 30 s, which is 5,000 residues against 100 alleles.
 
