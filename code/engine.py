@@ -1,4 +1,4 @@
-"""Inference engine of the img1 web server: the four PREpiBind heads behind one ESMC 300M, as plain functions of a DataFrame.
+"""Inference engine of the PREpiBind web server: the four PREpiBind heads behind one ESMC 300M, as plain functions of a DataFrame.
 
 It replaces what the baseline spread over app.py (model loading), inference.py (DataLoader, Streamlit progress bar, sigmoid) and encoder.py / dataprovider.py (HLA lookup, tokenising):
 no Streamlit import, no DataLoader workers, no configuration file executed as code, no hard-coded GPU index (select the GPU with CUDA_VISIBLE_DEVICES). The arithmetic is the baseline's:
@@ -45,7 +45,7 @@ HEAD_CHECKPOINTS = {
 HEAD_ARGS = {"hla_dim": 960, "epi_dim": 960, "head_div": 64}
 EMBEDDING_BUDGET = 1 << 30  # bytes of epitope embeddings the fast path holds at once (about 37,000 distinct 15-mers, 17,000 distinct 32-mers)
 MAX_PAIRS = 2048  # distinct HLA pairs the fast path encodes at once (the pair encodings take 0.6 GB); a request with more runs on the exact path
-MAX_EPITOPE_LENGTH = 20  # residues, refused above (261115_img1_web_caps_scan_custom): the heads were trained on 15-mers only and with random flanks the AUC falls from 0.93 at 15 to 0.87 at 20 and 0.82 at 25 (a shuffled epitope: 0.80) while the share of non-binders scored above 0.5 rises from 15 % to 27 % and 41 % (the released Qualitative head, 261115_img1_web_snu_conditions/swap_eval/length)
+MAX_EPITOPE_LENGTH = 20  # residues, refused above: the heads were trained on 15-mers only and with random flanks the AUC falls from 0.93 at 15 to 0.87 at 20 and 0.82 at 25 (a shuffled epitope: 0.80) while the share of non-binders scored above 0.5 rises from 15 % to 27 % and 41 % (the released Qualitative head)
 MAX_CHAIN_LENGTH = 300  # residues of an HLA chain given as a sequence (Custom Mode), refused above: the allele catalogue's longest chain has 285, 99 % have at most 266
 
 _tokenizer = EsmSequenceTokenizer()

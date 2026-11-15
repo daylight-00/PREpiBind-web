@@ -1,0 +1,5 @@
+# Security headers, robots.txt and cookies
+
+`serve.py` is the ASGI entry point: it hands `app.py` to Streamlit's `st.App` together with the middleware of `security_config.py`, which sets `Content-Security-Policy`, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection: 1; mode=block` and `Referrer-Policy` on every response and answers `/robots.txt` and `<base path>/robots.txt` with the `robots.txt` of this directory (`Disallow: /`). These are what the SNU information-security office's scan (wscan) asks of a service on the university domain. `streamlit run app.py` still works but sends none of them.
+
+Not in the app: the `Server` header (uvicorn sends `Server: uvicorn`, without a version; nginx removes it on the public route), HSTS (TLS ends in nginx) and cookie flags. The app sets no cookie: the XSRF token is the only one Streamlit has, its frontend reads it from JavaScript, so it cannot be HttpOnly (measured in Chromium: with an HttpOnly token every upload fails with 403) and without a login it protects nothing, so `.streamlit/config.toml` turns it off.

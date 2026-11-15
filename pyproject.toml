@@ -1,7 +1,7 @@
 [project]
 name = "prepibind-web"
 version = "0"
-description = "PREpiBind web server: the img1 baseline model, with everything around it kept current"
+description = "PREpiBind web server"
 requires-python = ">=3.14"
 dependencies = [
     "torch",
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The fast engine (TensorRT fp16, see README "Fast engine"): building the plans needs onnx and onnxscript, running them only tensorrt.
+# The fast engine (TensorRT fp16, see docs/engine.md): building the plans needs onnx and onnxscript, running them only tensorrt.
 # NVIDIA publishes no TensorRT wheel for Python 3.15 yet (11.1 to 11.4 stop at cp314): there the extra installs only onnx and onnxscript, which are of no use without TensorRT, and the engine serves the exact path.
 trt = [
     "tensorrt-cu13>=11.4; python_version < '3.15'",

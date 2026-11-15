@@ -8,7 +8,7 @@ import pandas as pd
 AMINO = "ACDEFGHIKLMNPQRSTVWYX"
 DEFAULT_WINDOW = 15  # what the model was trained on
 WINDOW_LENGTHS = tuple(range(12, 21))  # optional lengths: the engine refuses epitopes above 20 residues (engine.MAX_EPITOPE_LENGTH) and the scores fall off with the distance from 15
-# The limits of a scan, from the measured throughput (261115_img1_web_caps_scan_custom/scan_throughput.json): the fast path scores 16,000-17,000 predictions per second from 13,000 to 1,200,000 predictions
+# The limits of a scan, from the measured throughput: the fast path scores 16,000-17,000 predictions per second from 13,000 to 1,200,000 predictions
 # (GPU memory stays under 350 MiB over the engine's own), the exact path, which serves when the plans are unavailable, about 2,000. A scan may take about 30 s on the fast path: 500,000 predictions, which is
 # 5,000 residues (the longest proteins of interest short of a coronavirus polyprotein) against 100 alleles; and about 50 s when only the exact path is available: 100,000 predictions.
 MAX_PROTEIN_LENGTH = 5000  # residues

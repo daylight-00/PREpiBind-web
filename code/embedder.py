@@ -1,4 +1,4 @@
-"""ESMC 300M as the epitope embedder of the img1 heads.
+"""ESMC 300M as the epitope embedder of the PREpiBind heads.
 
 The released checkpoint (esmc_300m_2024_12_v0_fp16.pth, 308 tensors) uses the original EvolutionaryScale key layout. Current `esm` keeps ESMC in a Hugging Face style
 layout (fused projections under other names), so the keys are renamed at load: renames only, every tensor is passed through unchanged. Only the encoder is built;

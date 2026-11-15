@@ -31,7 +31,7 @@ def test_the_limits_are_read_when_called_so_a_benchmark_can_raise_them(monkeypat
 
 
 def test_the_limit_is_the_one_the_measurements_support():
-    """20: every head's AUC steps down between 20 and 21 residues (261115_img1_web_caps_scan_custom/length_auc*.json); the chain limit rounds the catalogue's longest chain (285) up."""
+    """20: every head's AUC steps down between 20 and 21 residues; the chain limit rounds the catalogue's longest chain (285) up."""
     assert engine.MAX_EPITOPE_LENGTH == 20
     assert engine.MAX_CHAIN_LENGTH == 300
 
