@@ -42,7 +42,7 @@ with col1:
 - PREpiBind methodology: [bioRxiv preprint](https://doi.org/10.64898/2026.09.15.751749)
 - PREpiBind training & evaluation code and datasets: [GitHub](https://github.com/daylight-00/PREpiBind), archived at [Zenodo](https://doi.org/10.5281/zenodo.22934281)
 - Raw model predictions and the IEDB export behind the datasets: [Zenodo](https://doi.org/10.5281/zenodo.22857373)
-- PREpiBind web server code: ~[GitHub](https://github.com/daylight-00/PREpiBind-web)~
+- PREpiBind web server code: [GitHub](https://github.com/daylight-00/PREpiBind-web)
 - PREpiBind checkpoints released with the paper (the server runs the float16 copies): [HuggingFace (float32)](https://huggingface.co/daylight-00/prepibind), [HuggingFace (float16 demo)](https://huggingface.co/daylight-00/prepibind-demo)
 - Pre-computed MHC-II embeddings: [HuggingFace](https://huggingface.co/datasets/daylight-00/prepibind-embeddings)
 - ESMC 300M weights: [HuggingFace](https://huggingface.co/biohub/esmc-300m-2024-12)

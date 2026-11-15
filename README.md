@@ -94,4 +94,4 @@ The ESMC 300M weights are released under the MIT License by Chan Zuckerberg Bioh
 The PREpiBind web server source code is released under the [MIT License](LICENSE).
 The ESMC 300M weights are released under the MIT License (Chan Zuckerberg Biohub).
 
-The data are not MIT: the tables under `data/` derive from IEDB (CC BY 4.0), IPD-IMGT/HLA (CC BY-NoDerivs) and UniProt (CC BY 4.0). Terms and attribution are in the [third-party notices](https://github.com/daylight-00/PREpiBind/blob/main/THIRD_PARTY_NOTICES.md) of the PREpiBind repository. Third-party models, weights and tools carry their own terms.
+The data are not MIT: the tables under `data/` derive from IEDB (CC BY 4.0), IPD-IMGT/HLA (CC BY-NoDerivs) and UniProt (CC BY 4.0). Terms per file are in [data/LICENSE.md](data/LICENSE.md); attribution is in the [third-party notices](https://github.com/daylight-00/PREpiBind/blob/main/THIRD_PARTY_NOTICES.md) of the PREpiBind repository. Third-party models, weights and tools carry their own terms.
