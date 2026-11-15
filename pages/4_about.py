@@ -13,7 +13,6 @@ st.markdown("**P**rotein **R**epresentation-integrated **Epi**tope-MHC Class II 
 # Authors section
 st.markdown("""
 ### Contact
-For inquiries regarding the web server, please contact David Hyunyoo Jang:
 [hwjang00@snu.ac.kr](mailto:hwjang00@snu.ac.kr) | [GitHub](https://github.com/daylight-00)
 
 """)
