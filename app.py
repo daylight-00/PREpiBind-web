@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit.runtime.pages_manager import PagesManager
 import pandas as pd
 import re
 
@@ -7,6 +8,11 @@ from pathlib import Path
 utils_path = os.path.abspath('code')
 sys.path.insert(0, utils_path)
 from engine import shared
+
+# Streamlit runs this file as the main script and, the first time a page does `from app import ...`, as the module `app`. Until st.navigation has run, the first request of a process uses the legacy mode of a
+# `pages/` directory (a deep link runs the page file itself, not this script), and the import was what then built the navigation and ran the page a second time: the first session after a start drew its page twice,
+# or failed on a duplicate widget key. st.navigation switches the legacy mode off for good; this does it at the first import and the navigation below is built by the main script only.
+PagesManager.uses_pages_directory = False
 
 @st.cache_resource(show_spinner="Loading models...")
 def get_engine():
@@ -73,13 +79,14 @@ def write_st_end():
     )
     st.markdown("© 2025 David Hyunyoo Jang | Built with ESM")
 
-pg = st.navigation([
-    st.Page("pages/0_home.py", title="Home"),
-    st.Page("pages/1_prediction.py", title="Prediction"),
-    st.Page("pages/6_scan.py", title="Scan"),
-    st.Page("pages/5_custom.py", title="Custom Mode"),
-    st.Page("pages/2_evaluation.py", title="Evaluation"),
-    st.Page("pages/3_instructions.py", title="Instructions"),
-    st.Page("pages/4_about.py", title="About"),
-], position="top",)
-pg.run()
+if __name__ == "__main__":  # not when a page imports this module
+    pg = st.navigation([
+        st.Page("pages/0_home.py", title="Home"),
+        st.Page("pages/1_prediction.py", title="Prediction"),
+        st.Page("pages/6_scan.py", title="Scan"),
+        st.Page("pages/5_custom.py", title="Custom Mode"),
+        st.Page("pages/2_evaluation.py", title="Evaluation"),
+        st.Page("pages/3_instructions.py", title="Instructions"),
+        st.Page("pages/4_about.py", title="About"),
+    ], position="top",)
+    pg.run()
