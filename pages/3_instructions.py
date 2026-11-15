@@ -26,7 +26,7 @@ st.markdown("""
 - **Beta chains**: 6,444 alleles — HLA-DPB1, HLA-DQB1, HLA-DQB2, HLA-DRB1, HLA-DRB3/4/5/6/9, and murine H2-IA/IE variants
     - Default: HLA-DRB1*15:01
 - **Nomenclature**: WHO HLA nomenclature (e.g., HLA-DRB1*01:01)
-- **Coverage note**: Pre-computed ESM C embeddings are available for all 7,282 alleles listed above. The underlying models were trained on 151 unique HLA dimers (27 alpha × 89 beta allele combinations) from IEDB; predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
+- **Coverage note**: Pre-computed ESM C embeddings are available for all 7,282 alleles listed above. The underlying models were trained on 148 unique HLA dimers (Qualitative dataset; 138 MS, 67 IC50: see Prediction Models) from IEDB; predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
 
 #### CSV Upload
 
@@ -48,7 +48,7 @@ HLA-DRA*01:01,HLA-DRB1*15:01,GELIGILNAAKVPAD
 
 ### Prediction Models
 
-PREpiBind provides four models trained on distinct dataset types derived from the Immune Epitope Database (IEDB; April 2025). All models were trained on 15-mer peptides spanning 151 unique HLA class II dimers (27 alpha chains, 89 beta chains; human HLA-DP/DQ/DR and murine H2). All models share the same architecture: ESM C 300M embeddings processed by a two-block transformer encoder, with separate encoders for MHC and peptide inputs, followed by a joint interaction layer and mean pooling.
+PREpiBind provides four models trained on distinct dataset types derived from the Immune Epitope Database (IEDB; export of 21 April 2025). The Qualitative, MS and IC50 datasets hold 161,223, 111,444 and 47,154 entries of 15-mer peptides with human HLA-DP/DQ/DR and murine H2 molecules, split 70:30 into a training set and an independent test set. The training sets span 148 unique HLA class II dimers (27 alpha chains, 88 beta chains) in the Qualitative dataset, 138 (27 alpha, 80 beta) in MS and 67 (22 alpha, 61 beta) in IC50; all the data together span 151 dimers (27 alpha chains, 89 beta chains). All models share the same architecture: ESM C 300M embeddings processed by separate encoders for MHC and peptide inputs (two transformer layers each), concatenated and passed through one self-attention interaction block, mean pooling and a two-layer prediction head.
 
 #### Available Models
 
@@ -65,7 +65,7 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 - **Output**: Probability of binding at IC50 ≤ 1000 nM (moderate binder)
 
 **Mass Spectrometry (MS) Elution**
-- **Training data**: Naturally presented ligands identified by HLA ligandomics (MS-derived positives from IEDB; negatives from the quantitative dataset)
+- **Training data**: Naturally presented ligands identified by HLA ligandomics (MS-derived positives from IEDB; negatives: experimentally measured non-binders of the Qualitative dataset)
 - **Output**: Probability of natural MHC-II presentation
 
 #### Technical Details
@@ -77,7 +77,7 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 
 **Standard Mode:**
 - Uses pre-computed ESM C 300M embeddings for all 7,282 IPD-IMGT/HLA-catalogued alleles (human HLA-DP/DQ/DR and murine H2)
-- Training covered 151 unique HLA dimers; predictions for the remaining alleles rely on PLM-based zero-shot generalization
+- Training covered 148 unique HLA dimers (Qualitative dataset); predictions for the remaining alleles rely on PLM-based zero-shot generalization
 - Recommended for routine screening with human or murine alleles
 
 **Custom HLA Mode:**
@@ -85,7 +85,7 @@ PREpiBind provides four models trained on distinct dataset types derived from th
 - A chain whose sequence is in the allele catalogue is scored exactly as Standard Mode scores that allele: a pair of two such chains gives the same result as selecting the two alleles, at the same speed. The result table says so in the column `HLA chains` (`catalogue`)
 - Any other chain: the model reads the domain of an HLA chain (58-82 residues) cut from the embedding of the whole chain, so the domain is located by alignment to the allele catalogue. The nearest allele, the identity with it and the window are listed in a table under the input, where Start and End (residue numbers from 1) can be corrected; the chain is embedded on-the-fly and the domain cut out. A domain pasted without its flanks gets the nearest chain's flanks added. The column `HLA chains` says `located` (identity 0.5 or more with the nearest catalogue chain), `low confidence` (0.4 to 0.5: check the window) or `manual window`. Measured with every catalogue chain treated as unknown and its own entry or its whole gene hidden from the search, full chains differ from Standard Mode in 0.3 to 0.4 % of the signs and domains pasted alone in 0.5 to 2.7 % (against 8 % for the earlier full-chain run)
 - A chain with no domain found (identity below 0.4: not an MHC class II chain, or too far from the catalogue) is embedded over its full length unless you enter Start and End; that is not what the model was trained on, so the result is not validated and is marked `full chain`
-- Required for alleles absent from the server database, including non-human primate (*Macaca mulatta*, Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study
+- Required for alleles absent from the server database, for example MHC alleles of other species (non-human primates, pigs, cattle); the paper did not evaluate these, so their results are not validated
 
 ---
 
@@ -151,7 +151,7 @@ HLA-DRA*01:01,HLA-DRB1*15:01,GELIGILNAAKVPAD,0
 - **Precision**: Positive predictive value at threshold 0.5
 - **MCC (Matthews Correlation Coefficient)**: Balanced measure accounting for all four confusion matrix cells
 
-Built-in test sets (from the original publication) are available for each model and can be downloaded from the Evaluation page.
+Built-in test sets (the independent test sets of the paper: 48,352 Qualitative, 33,490 MS and 14,150 IC50 rows) are available for each model and can be downloaded from the Evaluation page.
 
 ---
 
@@ -193,9 +193,9 @@ Session state is independent per browser tab; results are not persisted across s
 ### Limitations
 
 - The model was trained exclusively on 15-mer peptides. Peptides of up to 20 residues are accepted, but their accuracy is not validated and falls with the distance from 15: with random flanks added to the 15-mers of the built-in Qualitative test set the ROC AUC is 0.93 at 15 residues and 0.87 at 20 (0.80 at 25, about what a shuffled epitope gives, 0.79), and the share of non-binders scored above 0.5 rises from 15 % at 15 residues to 29 % at 20. Longer peptides are refused for that reason; to score a longer sequence, use the Scan page, which scores windows of at most 20 residues.
-- Training comprised 151 unique HLA class II dimers (27 alpha × 89 beta allele combinations) from IEDB. The 7,282 alleles available in Standard Mode exceed the training coverage; predictions for alleles absent from the training set rely on PLM-based zero-shot generalization, and performance may degrade for alleles distant from those seen during training.
+- Training comprised 148 unique HLA class II dimers (27 alpha × 88 beta chains; Qualitative dataset, fewer for MS and IC50, see Prediction Models) from IEDB. The 7,282 alleles available in Standard Mode exceed the training coverage; predictions for alleles absent from the training set rely on PLM-based zero-shot generalization, and performance may degrade for alleles distant from those seen during training.
 - Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for these species.
-- Cross-species predictions (murine H2 alleles) show reduced accuracy relative to human HLA alleles in leave-one-molecule-out validation; see the original publication for quantitative results.
+- Murine H2 alleles have the lowest accuracy of the four serotypes in the paper's Qualitative benchmark (ROC AUC 0.81 to 0.87), and when all H2 data are withheld from training the pooled ROC AUC falls to 0.68 (ESMC 300M); see the preprint for the quantitative results.
 - Binding affinity prediction does not model antigen processing efficiency, HLA-DM-mediated peptide editing, or T cell receptor recognition.
 - Predictions should not be used for clinical or diagnostic decision-making.
 
@@ -205,7 +205,7 @@ Session state is independent per browser tab; results are not persisted across s
 
 If you use PREpiBind, please cite:
 
-> Jang DH, Kim D, Park B, Hwang U, Choi Y, Lee J. PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction. *TBD* (2025).
+> Jang DH, Kim D, Hwang U, Park B, Choi Y, Lee J. PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction. *bioRxiv* (2026). [doi:10.64898/2026.09.15.751749](https://doi.org/10.64898/2026.09.15.751749)
 
 """)
 

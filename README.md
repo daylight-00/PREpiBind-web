@@ -8,7 +8,7 @@
 > Jang DH, Kim D, Choi Y, Lee J.
 > *TBD* (2026)
 
-A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESM C 300M protein language model embeddings. The server implements four task-specific models trained on qualitative, IC50, and mass spectrometry ligandomics data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
+A Streamlit-based web server for predicting peptide binding to human and mouse MHC class II molecules using ESM C 300M protein language model embeddings. The server implements four task-specific models trained on qualitative binding, mass spectrometry ligandomics, and thresholded IC50 data from IEDB, and provides pre-computed embeddings for 7,282 alleles (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA.
 
 **Live server:** [https://lcdd.snu.ac.kr/prepibind](https://lcdd.snu.ac.kr/prepibind)
 
@@ -91,19 +91,15 @@ cd PREpiBind-web
 uv sync
 ```
 
-### 2. Download model checkpoints
+### 2. Model checkpoints
 
-Download from HuggingFace and place in `models/`:
+Download the ESM C 300M base model (FP16) from HuggingFace and place it in `models/`:
 
 ```bash
-# PREpiBind task-specific checkpoints
-huggingface-cli download daylight-00/prepibind-esmc-300m --local-dir models/
-
-# ESM C 300M base model (FP16)
 huggingface-cli download daylight-00/esmc-300m-2024-12 --local-dir models/
 ```
 
-Expected files after download:
+The four task checkpoints are not published on HuggingFace. The checkpoints released with the paper, [`daylight-00/prepibind`](https://huggingface.co/daylight-00/prepibind) (float32) and [`daylight-00/prepibind-demo`](https://huggingface.co/daylight-00/prepibind-demo) (float16), are other runs of the same four tasks under other file names (`prepibind_<arm>_s<seed>_f<fold>.pt`). The server expects these files in `models/`:
 
 ```text
 models/
@@ -219,9 +215,9 @@ Column headers must match exactly. Allele names must follow WHO HLA nomenclature
 
 ## Notes on Allele Coverage
 
-The server provides pre-computed ESM C embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **151 unique HLA dimers** (27 alpha × 89 beta allele combinations) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
+The server provides pre-computed ESM C embeddings for **7,282 alleles** (838 alpha, 6,444 beta chains) from IPD-IMGT/HLA. However, the underlying models were trained on **148 unique HLA dimers** (27 alpha × 88 beta chains; Qualitative dataset, 138 for MS and 67 for IC50; 151 across all the data) from IEDB. Predictions for alleles outside the training set rely on PLM-based zero-shot generalization.
 
-Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated in the original study are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for these species.
+MHC alleles of other species (non-human primates, pigs, cattle) are not available in Standard Mode; use Custom HLA Mode with explicit sequence input for them. The paper did not evaluate these, so their results are not validated.
 
 ---
 
@@ -230,21 +226,21 @@ Non-human primate (Mamu), porcine (SLA), and bovine (BoLA) MHC alleles evaluated
 If you use PREpiBind or this web server, please cite:
 
 ```bibtex
-@article{Jang2026PREpiBind,
-  author  = {Jang, David Hyunyoo and Kim, Dongwoo and Park, Byungho
-             and Hwang, Untaek and Choi, Yoonjoo and Lee, Juyong},
-  title   = {{PREpiBind}: Protein Representation-integrated
-             Epitope--{MHC} Class {II} Binding Prediction},
-  journal = {TBD},
+@article{jang2026prepibind,
+  title   = {PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction},
+  author  = {Jang, David Hyunyoo and Kim, Dongwoo and Hwang, Untaek and Park, Byungho and Choi, Yoonjoo and Lee, Juyong},
+  journal = {bioRxiv},
   year    = {2026},
+  doi     = {10.64898/2026.09.15.751749},
+  url     = {https://www.biorxiv.org/content/10.64898/2026.09.15.751749v1}
 }
 ```
 
-The ESM C 300M model is developed by EvolutionaryScale and is subject to the [Cambrian Open License Agreement](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement).
+The ESM C 300M weights are released under the MIT License by Chan Zuckerberg Biohub ([`biohub/esmc-300m-2024-12`](https://huggingface.co/biohub/esmc-300m-2024-12)).
 
 ---
 
 ## License
 
 The PREpiBind web server source code is released under the [MIT License](LICENSE).
-ESM C 300M model weights are subject to the Cambrian Open License (EvolutionaryScale).
+ESM C 300M model weights are released under the MIT License (Chan Zuckerberg Biohub).

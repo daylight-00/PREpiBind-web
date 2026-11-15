@@ -33,7 +33,7 @@ st.subheader("System Information")
 
 st.markdown("""
 - **Version:** beta
-- **Last Updated:** June 2025
+- **Last Updated:** November 2026
 - **Platform:** Web server
 - **Access:** Freely available; no login required
 - **Implementation:** Python/Streamlit
@@ -50,23 +50,22 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("##### **Academic & Technical Resources**")
     st.markdown("""
-- PREpiBind methodology: ~[Publication](https://doi.org/10.1093/tbd/xxx)~
-- PREpiBind training & evaluation code: ~[GitHub](https://github.com/daylight-00/PREpiBind)~
+- PREpiBind methodology: [bioRxiv preprint](https://doi.org/10.64898/2026.09.15.751749)
+- PREpiBind training & evaluation code and datasets: [GitHub](https://github.com/daylight-00/PREpiBind), archived at [Zenodo](https://doi.org/10.5281/zenodo.22934281)
+- Raw model predictions and the IEDB export behind the datasets: [Zenodo](https://doi.org/10.5281/zenodo.22857373)
 - PREpiBind web server code: ~[GitHub](https://github.com/daylight-00/PREpiBind-web)~
-- MHC-II allele datasets: ~[Zenodo](https://zenodo.org/communities/prepibind-mhc-alleles)~
-- PREpiBind checkpoints: [HuggingFace](https://huggingface.co/daylight00/prepibind-esmc-300m)
-- ESM C 300M checkpoints (float16): [HuggingFace](https://huggingface.co/daylight00/esmc-300m-2024-12)
-- Cached embeddings (ESM C 300M): [HuggingFace](https://huggingface.co/daylight00/esmc-300m-2024-12)
+- PREpiBind checkpoints released with the paper: [HuggingFace (float32)](https://huggingface.co/daylight-00/prepibind), [HuggingFace (float16 demo)](https://huggingface.co/daylight-00/prepibind-demo)
+- Pre-computed MHC-II embeddings: [HuggingFace](https://huggingface.co/datasets/daylight-00/prepibind-embeddings)
+- ESM C 300M weights: [HuggingFace](https://huggingface.co/biohub/esmc-300m-2024-12)
     """)
 
 
 with col2:
     st.markdown("##### **Licensing Information**")
     st.markdown("""
-- PREpiBind source code, web server, and datasets: **MIT License**
-- PREpiBind checkpoints: **MIT License**
-- ESM C 300M checkpoints & generated embeddings: 
-  **[Cambrian Open License](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement)** (EvolutionaryScale)
+- PREpiBind source code, web server code, and checkpoints: **MIT License**
+- ESM C 300M weights (Chan Zuckerberg Biohub): **MIT License**
+- Training data derive from IEDB (CC BY 4.0); allele sequences from IPD-IMGT/HLA (CC BY-NoDerivs) and UniProt (CC BY 4.0). The repository's third-party notices have the detail.
     """)
 
 st.markdown("""
@@ -81,26 +80,24 @@ st.subheader("Citation")
 st.markdown("""
 If you use PREpiBind, please cite:
 ```bibtex
-@article{Jang2025PREpiBind,
-  author = {Jang, David Hyunyoo and Kim, Dongwoo and Park, Byungho and Hwang, Untaek and Choi, Yoonjoo and Lee, Juyong},
-  title = {PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction},
-  year = {2025},
-  note = {Unpublished manuscript},
+@article{jang2026prepibind,
+  title   = {PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction},
+  author  = {Jang, David Hyunyoo and Kim, Dongwoo and Hwang, Untaek and Park, Byungho and Choi, Yoonjoo and Lee, Juyong},
+  journal = {bioRxiv},
+  year    = {2026},
+  doi     = {10.64898/2026.09.15.751749},
+  url     = {https://www.biorxiv.org/content/10.64898/2026.09.15.751749v1}
 }
 ```
-**PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction**  
-*TBD* (2025) [doi:10.1093/tbd/xxx]
-                        
+**PREpiBind: Protein Representation-integrated Epitope-MHC Class II Binding Prediction**
+*bioRxiv* (2026) [doi:10.64898/2026.09.15.751749](https://doi.org/10.64898/2026.09.15.751749)
+
 """)
 with st.expander("Show full abstract"):
     st.markdown("""
-Accurate prediction of peptide-major histocompatibility complex class II (pMHC-II) binding remains challenging due to polymorphism, variable peptide length, and complex structural interactions. Here, we present PREpiBind, a modular framework evaluating diverse protein representations, including classical alignment-based (BLOSUM62), structure-informed (AlphaFold 3, Chai-1, Boltz-1), and transformer-based protein language models (PLMs; ESM C, ESM3).
+**Motivation:** Accurate peptide–MHC class II (pMHC-II) binding prediction is complicated by MHC polymorphism and context-dependent peptide recognition. Protein representations are usually evaluated in different pipelines, obscuring their contribution to predictive performance.
 
-We systematically benchmarked PREpiBind against established methods (NetMHCIIpan, MixMHC2pred, DeepNeo) using comprehensive qualitative, quantitative (IC50), and mass spectrometry-derived ligandomics datasets. Transformer-based PLMs significantly outperformed classical and structure-informed embeddings across metrics (ROC AUC, PR AUC, F1, MCC). 
-
-PREpiBind showed robust generalization to unseen and rare alleles, demonstrated by stringent leave-one-molecule-out and cross-species validations. Our results highlight the critical importance of representation choice, emphasizing the advantages of context-aware, sequence-based embeddings over traditional methods.
-
-PREpiBind provides a reproducible, scalable computational tool, enhancing predictive performance and generalizability for immunotherapy design, vaccine development, and fundamental antigen presentation studies.
+**Results:** We present PREpiBind, a joint-attention framework comparing ten protein representations under a fixed architecture and identical data splits across qualitative binding, mass spectrometry, and thresholded IC50 datasets. Protein language models (PLMs) generally achieved the strongest pooled performance; ESM3 Large reached a ROC-AUC of 0.927 ± 0.002 on the qualitative dataset. PREpiBind PLM variants exceeded evaluated reference methods on qualitative and mass-spectrometry benchmarks, whereas NetMHCIIpan-4.3 was higher on thresholded IC50 using its binding-affinity head. PLM advantages narrowed in allele-wise and held-out MHC-molecule evaluations, and H2-out rankings depended on aggregation, indicating scenario-dependent representation performance.
     """)
 
 write_st_end()
